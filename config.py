@@ -93,7 +93,7 @@ class Settings:
 
 def build_settings() -> Settings:
     temp_dir = _resolve_path(_get_str("TEMP_DIR", "temp_downloads"))
-    cookies_file = _resolve_path(_get_str("COOKIES_FILE", "cookies.txt"))
+    cookies_file = _resolve_path(_get_str("COOKIES_FILE", "/root/ReSave/cookies.txt"))
     stats_db_path = _resolve_path(_get_str("STATS_DB_PATH", _get_str("DB_NAME", "database.db")))
     bot_api_base_url = _get_str("BOT_API_BASE_URL")
     bot_api_is_local = _get_bool("BOT_API_IS_LOCAL", bool(bot_api_base_url))
@@ -155,7 +155,7 @@ SEND_AS_DOC_LIMIT = SETTINGS.send_as_doc_limit
 BOT_API_BASE_URL = SETTINGS.bot_api_base_url
 BOT_API_IS_LOCAL = SETTINGS.bot_api_is_local
 BOT_API_UPLOAD_LIMIT = SETTINGS.bot_api_upload_limit
-COOKIES_FILE = SETTINGS.cookies_file
+COOKIES_FILE = "/root/ReSave/cookies.txt"
 DB_NAME = SETTINGS.stats_db_path
 STATS_DB_PATH = SETTINGS.stats_db_path
 ADMIN_IDS = SETTINGS.admin_ids
@@ -163,3 +163,13 @@ VIP_USERS = SETTINGS.vip_users
 LOG_LEVEL = SETTINGS.log_level
 MAX_VIDEO_DURATION = SETTINGS.max_video_duration
 MAX_PLAYLIST_ITEMS = SETTINGS.max_playlist_items
+
+# Конфиг для повторных попыток отправки
+UPLOAD_RETRY_CONFIG = {
+    "max_attempts": 5,
+    "base_delay": 3,
+    "max_delay": 30,
+    "backoff_factor": 2,
+    "jitter": 1,
+}
+UPLOAD_TIMEOUT = 300

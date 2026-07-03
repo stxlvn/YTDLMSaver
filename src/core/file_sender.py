@@ -1,127 +1,76 @@
-from __future__ import annotations
-
 import logging
 import os
 from pathlib import Path
-
+from aiogram.types import FSInputFile
 import config
-from ..utils.file_utils import sanitize_filename
-from ..utils.message_templates import MessageTemplate
-from .download_support import record_download_success
+from ..utils.retry_manager import get_smart_retry_manager, UPLOAD_RETRY_CONFIG
 
 logger = logging.getLogger(__name__)
 
+def send_file_with_retry(task, file_path: str, title: str, bot, thumbnail_path: str = None) -> bool:
+    file_ext = Path(file_path).suffix.lower()
+    video_exts = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
+    if file_ext in video_exts:
+        return _send_video_with_retry(task, file_path, title, bot, thumbnail_path)
+    else:
+        return _send_document_with_retry(task, file_path, title, bot)
 
-def send_file_with_retry(task, file_path, title, bot):
-    from ..utils.error_handler import get_error_handler
-    from ..utils.retry_manager import (
-        NonRetryableError,
-        UPLOAD_RETRY_CONFIG,
-        get_smart_retry_manager,
-    )
-
-    error_handler = get_error_handler()
+def _send_video_with_retry(task, file_path: str, title: str, bot, thumbnail_path: str = None) -> bool:
     retry_manager = get_smart_retry_manager(UPLOAD_RETRY_CONFIG)
 
-    file_extension = Path(file_path).suffix.lower()
-    audio_extensions = [".mp3", ".m4a", ".aac", ".ogg", ".wav", ".flac"]
-    original_title = task.info.get("title") or task.info.get("id") or title or "video"
-    file_size_bytes = os.path.getsize(file_path)
-    file_size_mb = file_size_bytes / (1024 * 1024)
+    def send():
+        video = FSInputFile(file_path)
+        kwargs = {
+            'chat_id': task.chat_id,
+            'video': video,
+            'caption': title,
+            'supports_streaming': True,
+            'disable_notification': False,
+            'timeout': config.UPLOAD_TIMEOUT,
+        }
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            # Используем FSInputFile для thumbnail
+            kwargs['thumbnail'] = FSInputFile(thumbnail_path)
+            logger.info(f"Thumbnail attached: {thumbnail_path}")
+        return bot.send_video(**kwargs)
 
-    def send_operation():
-        duration = task.info.get("duration")
-        safe_duration = int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
+    def on_retry(attempt, delay):
+        logger.warning("Повторная отправка видео (попытка %d) через %.1f сек", attempt, delay)
 
-        if task.action == "audio" and file_extension in audio_extensions:
-            audio_kwargs = {}
-            if safe_duration is not None:
-                audio_kwargs["duration"] = safe_duration
+    def on_failure(attempt, exception):
+        logger.error("Не удалось отправить видео после %d попыток: %s", attempt, exception)
 
-            bot.send_audio(
-                task.chat_id,
-                file_path,
-                title=original_title,
-                performer=task.info.get("uploader", "Unknown"),
-                timeout=300,
-                reply_to_message_id=task.reply_to_id,
-                **audio_kwargs,
-            )
-            return
+    result = retry_manager.retry_operation_smart(
+        send,
+        operation_id=f"upload_video_{task.task_id}",
+        on_retry=on_retry,
+        on_failure=on_failure,
+    )
+    return result is not None
 
-        caption = MessageTemplate.format_caption(
-            title=original_title,
-            url=task.url,
-            action="video",
-            file_size=file_size_mb,
-        )
-        if file_size_bytes > config.SEND_AS_DOC_LIMIT:
-            visible_file_name = (
-                f"{sanitize_filename(original_title) or 'video'}"
-                f"{file_extension or '.mp4'}"
-            )
-            logger.debug(
-                "Sending file as document: task_id=%s size=%.1fMB path=%s",
-                task.task_id,
-                file_size_mb,
-                file_path,
-            )
-            bot.send_document(
-                task.chat_id,
-                file_path,
-                caption=caption,
-                parse_mode="HTML",
-                timeout=600,
-                reply_to_message_id=task.reply_to_id,
-                visible_file_name=visible_file_name,
-            )
-            return
+def _send_document_with_retry(task, file_path: str, title: str, bot) -> bool:
+    retry_manager = get_smart_retry_manager(UPLOAD_RETRY_CONFIG)
 
-        logger.debug(
-            "Sending file as video: task_id=%s size=%.1fMB path=%s",
-            task.task_id,
-            file_size_mb,
-            file_path,
-        )
-        bot.send_video(
-            task.chat_id,
-            file_path,
-            caption=caption,
-            parse_mode="HTML",
-            supports_streaming=True,
-            timeout=600,
-            reply_to_message_id=task.reply_to_id,
+    def send():
+        # Для документов используем FSInputFile тоже (для единообразия)
+        doc = FSInputFile(file_path)
+        return bot.send_document(
+            chat_id=task.chat_id,
+            document=doc,
+            caption=title,
+            timeout=config.UPLOAD_TIMEOUT,
         )
 
     def on_retry(attempt, delay):
-        if not task.silent_mode:
-            try:
-                bot.edit_message_text(
-                    f"📤 Отправка файла (попытка {attempt})...\n"
-                    f"⏱️ Ожидание {delay:.0f} сек",
-                    task.chat_id,
-                    task.message_id,
-                )
-            except Exception:
-                pass
+        logger.warning("Повторная отправка документа (попытка %d) через %.1f сек", attempt, delay)
 
     def on_failure(attempt, exception):
-        if exception and not task.silent_mode:
-            error_msg = error_handler.handle_error(exception)
-            try:
-                bot.edit_message_text(error_msg.user_message, task.chat_id, task.message_id)
-            except Exception:
-                pass
+        logger.error("Не удалось отправить документ после %d попыток: %s", attempt, exception)
 
-    try:
-        retry_manager.retry_operation_smart(
-            send_operation,
-            operation_id=f"upload_{task.task_id}",
-            on_retry=on_retry,
-            on_failure=on_failure,
-        )
-        stats_action = "audio" if task.action == "audio" else "video"
-        record_download_success(task.chat_id, action=stats_action, file_size_mb=file_size_mb)
-    except Exception as exc:
-        logger.error("Ошибка при отправке файла после всех попыток: %s", exc)
-        raise NonRetryableError(f"Upload failed after retries: {exc}") from exc
+    result = retry_manager.retry_operation_smart(
+        send,
+        operation_id=f"upload_document_{task.task_id}",
+        on_retry=on_retry,
+        on_failure=on_failure,
+    )
+    return result is not None

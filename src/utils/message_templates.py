@@ -32,7 +32,7 @@ class MessageTemplate:
         
         caption += f"{MessageTemplate._format_original_link(url)}\n\n"
         
-        caption += "⚡ @ReSafeBot"
+        caption += ""
         
         return caption
     
@@ -41,7 +41,7 @@ class MessageTemplate:
         suffix = f" ({count} шт.)" if count > 1 else ""
         return (
             f"🖼️ <b>Фото из TikTok</b>{suffix}\n\n"
-            f"{MessageTemplate._format_original_link(url)}\n\n⚡ @ReSafeBot"
+            f"{MessageTemplate._format_original_link(url)}\n\n"
         )
     
     @staticmethod
@@ -55,13 +55,13 @@ class MessageTemplate:
         
         caption += f"\n{MessageTemplate._format_original_link(url)}\n\n"
         
-        caption += "⚡ @ReSafeBot"
+        caption += ""
         return caption
     
     @staticmethod
     def format_gif_caption(title: str, url: str) -> str:
         safe_title = MessageTemplate._escape_text(title)
-        return f"✨ <b>{safe_title}</b>\n\n{MessageTemplate._format_original_link(url)}\n\n⚡ @ReSafeBot"
+        return f"✨ <b>{safe_title}</b>\n\n{MessageTemplate._format_original_link(url)}\n\n"
     
     @staticmethod
     def format_subtitles_caption(title: str, url: str, language: str = "en/ru") -> str:
@@ -71,7 +71,7 @@ class MessageTemplate:
         caption += f"🗣️ Языки: {safe_language}\n"
         caption += f"\n{MessageTemplate._format_original_link(url)}\n\n"
         
-        caption += "⚡ @ReSafeBot"
+        caption += ""
         return caption
     
 

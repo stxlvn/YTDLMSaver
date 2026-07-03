@@ -47,88 +47,68 @@ def _build_download_limit_text(chat_id: int) -> str:
 
 
 def _build_download_markup(message_id: int, info: dict, resolutions: dict[int, dict]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    url = info.get("webpage_url") or info.get("original_url")
+    available_actions = ["best", "medium", "low", "audio", "gif"]
+    
+    if url:
+        try:
+            from src.core.download_handler import get_available_actions_optimized
+            available_actions, info = get_available_actions_optimized(url)
+        except Exception as e:
+            logger.warning(f"Size filter error: {e}")
 
-    youtube_resolutions = _youtube_resolution_buttons(message_id, info, resolutions)
+    # 🔥 РАДИКАЛЬНАЯ ФИЛЬТРАЦИЯ: удаляем "best" при любом 4K формате
+    formats = info.get("formats", []) if info else []
+    has_4k = any(f.get("height", 0) >= 2160 for f in formats if f.get("vcodec") != "none")
+    
+    if has_4k:
+        if "best" in available_actions:
+            available_actions.remove("best")
+        logger.info("4K format detected. 'best' button forcefully removed.")
+
+    # Фильтруем разрешения для отображения
+    filtered_resolutions = {}
+    for h, d in resolutions.items():
+        if h > 720 and "best" not in available_actions: continue
+        if h > 480 and h <= 720 and "medium" not in available_actions: continue
+        if h <= 480 and "low" not in available_actions: continue
+        filtered_resolutions[h] = d
+
+    rows: list[list[InlineKeyboardButton]] = []
+    youtube_resolutions = _youtube_resolution_buttons(message_id, info, filtered_resolutions)
+    
     if youtube_resolutions:
         rows.extend(youtube_resolutions)
     else:
-        rows.extend(
-            [
-                [
-                    InlineKeyboardButton(
-                        text="🎬 Максимум",
-                        callback_data=f"dl_best_{message_id}",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="📹 720p",
-                        callback_data=f"dl_medium_{message_id}",
-                    ),
-                    InlineKeyboardButton(
-                        text="📱 480p",
-                        callback_data=f"dl_low_{message_id}",
-                    )
-                ],
-            ]
-        )
+        fallback_buttons = []
+        if "best" in available_actions:
+            fallback_buttons.append([InlineKeyboardButton(text="🎬 Максимум", callback_data=f"dl_best_{message_id}")])
+        med_low_row = []
+        if "medium" in available_actions:
+            med_low_row.append(InlineKeyboardButton(text="📹 720p", callback_data=f"dl_medium_{message_id}"))
+        if "low" in available_actions:
+            med_low_row.append(InlineKeyboardButton(text="📱 480p", callback_data=f"dl_low_{message_id}"))
+        if med_low_row:
+            fallback_buttons.append(med_low_row)
+        rows.extend(fallback_buttons)
 
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="🎵 MP3",
-                callback_data=f"dl_audio_{message_id}",
-                style="primary",
-            )
-        ]
-    )
+    if "audio" in available_actions:
+        rows.append([InlineKeyboardButton(text="🎵 MP3", callback_data=f"dl_audio_{message_id}", style="primary")])
 
     duration = info.get("duration")
-    if duration and duration <= 30:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="✨ GIF",
-                    callback_data=f"dl_gif_{message_id}",
-                )
-            ]
-        )
+    if duration and duration <= 30 and "gif" in available_actions:
+        rows.append([InlineKeyboardButton(text="✨ GIF", callback_data=f"dl_gif_{message_id}")])
 
     subtitles = info.get("subtitles", {})
     auto_captions = info.get("automatic_captions", {})
     if subtitles or auto_captions:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="📝 Субтитры",
-                    callback_data=f"dl_subtitles_{message_id}",
-                    style="primary",
-                )
-            ]
-        )
+        rows.append([InlineKeyboardButton(text="📝 Субтитры", callback_data=f"dl_subtitles_{message_id}", style="primary")])
 
     if info.get("thumbnail"):
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🖼️ Превью",
-                    callback_data=f"dl_thumbnail_{message_id}",
-                    style="success",
-                )
-            ]
-        )
+        rows.append([InlineKeyboardButton(text="🖼️ Превью", callback_data=f"dl_thumbnail_{message_id}", style="success")])
 
-    rows.append([
-        InlineKeyboardButton(
-            text="✕ Отмена",
-            callback_data=f"cancel_{message_id}",
-            style="danger",
-        )
-    ])
+    rows.append([InlineKeyboardButton(text="✕ Отмена", callback_data=f"cancel_{message_id}", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def _youtube_resolution_buttons(
     message_id: int,
     info: dict,

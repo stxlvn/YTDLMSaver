@@ -1,0 +1,66 @@
+import logging
+import os
+import time
+from pathlib import Path
+
+from aiogram.types import FSInputFile
+
+import config
+from ..utils.retry_manager import DOWNLOAD_RETRY_CONFIG, get_smart_retry_manager
+
+logger = logging.getLogger(__name__)
+
+
+def send_file_with_retry(task, file_path: str, title: str, bot, thumbnail_path: str = None):
+    """
+    Отправляет файл с повторами.
+    Если файл является видео (mp4, avi, mov и т.д.) и thumbnail_path задан,
+    отправляет через send_video с обложкой.
+    Для остальных — send_document.
+    """
+    retry_manager = get_smart_retry_manager(DOWNLOAD_RETRY_CONFIG)
+
+    def send_operation():
+        file_size = os.path.getsize(file_path)
+
+        # Определяем, является ли файл видео
+        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv'}
+        ext = Path(file_path).suffix.lower()
+        is_video = ext in video_extensions
+
+        if is_video and thumbnail_path and os.path.exists(thumbnail_path):
+            # Отправляем как видео с обложкой
+            with open(file_path, 'rb') as f:
+                video_file = FSInputFile(file_path)
+                thumb_file = FSInputFile(thumbnail_path) if thumbnail_path else None
+                # Определяем длительность и размеры (если есть возможность)
+                # Можно получить из task.info, но для простоты оставим без
+                bot.send_video(
+                    chat_id=task.chat_id,
+                    video=video_file,
+                    caption=f"{title}",
+                    thumbnail=thumb_file,
+                    supports_streaming=True,
+                    # duration, width, height можно добавить, если есть в task.info
+                )
+        else:
+            # Отправляем как документ
+            with open(file_path, 'rb') as f:
+                bot.send_document(
+                    chat_id=task.chat_id,
+                    document=FSInputFile(file_path),
+                    caption=f"{title}",
+                )
+
+    def on_retry(attempt, delay):
+        logger.warning("Ошибка отправки файла, попытка %d через %.1f сек", attempt, delay)
+
+    def on_failure(attempt, exception):
+        logger.error("Не удалось отправить файл после %d попыток: %s", attempt, exception)
+
+    retry_manager.retry_operation_smart(
+        send_operation,
+        operation_id=f"send_file_{task.task_id}",
+        on_retry=on_retry,
+        on_failure=on_failure,
+    )
