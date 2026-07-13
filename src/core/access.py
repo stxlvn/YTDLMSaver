@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ..utils.i18n import i18n
 
 from dataclasses import dataclass
 
@@ -86,7 +87,7 @@ def build_playlist_limit_error(user_id: int, entries_count: int) -> str | None:
     limits = get_user_limits(user_id)
     if limits.max_playlist_items <= 0:
         return (
-            "🎶 Скачивание плейлистов доступно только для premium-пользователей.\n\n"
+            i18n.get(chat_id, "status_playlist_premium") +
             "Отправьте обычную ссылку на один ролик или добавьте пользователя в VIP."
         )
 

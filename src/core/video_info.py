@@ -18,6 +18,7 @@ def fetch_video_info(url):
             "socket_timeout": 10,
             "cookiefile": cookie_path,
             "nocheckcertificate": True,
+            "ignore_no_formats_error": True,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -39,6 +40,7 @@ def check_subtitles_available(url):
             "socket_timeout": 5,
             "cookiefile": cookie_path,
             "nocheckcertificate": True,
+            "ignore_no_formats_error": True,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -1,235 +1,114 @@
 import logging
 import time
 from datetime import datetime
-
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 from ..core.user_stats import get_stats_manager
 from ..utils.ui_manager import get_ui_manager
+from ..utils.i18n import i18n
 
 logger = logging.getLogger(__name__)
-
 
 def register_command_handlers(router: Router):
     ui_manager = get_ui_manager()
 
-    async def safe_reply(message: Message, text: str, **kwargs):
+    async def safe_reply(m: Message, text: str, **kwargs):
         try:
-            return await message.reply(text, **kwargs)
-        except (TelegramBadRequest, TelegramForbiddenError) as exc:
-            logger.warning("Не удалось ответить на команду в чате %s: %s", message.chat.id, exc)
+            return await m.reply(text, **kwargs)
+        except Exception:
             return None
 
-    async def send_welcome(message: Message):
-        welcome_text = ui_manager.format_panel(
-            "ReSave",
-            [
-                "Скачиваю видео, аудио, превью и медиа по ссылке.",
-                "",
-                "Как начать:",
-                "1. Отправьте ссылку на видео.",
-                "2. Выберите качество или формат.",
-                "3. Получите готовый файл.",
-                "",
-                "Платформы: YouTube, TikTok, Instagram, X/Twitter, Facebook, Vimeo, Twitch, Reddit.",
-            ],
-            icon="⚡",
-            footer="Команды: /help · /status · /stats · /cancel",
-        )
-        await safe_reply(message, welcome_text)
+    async def send_welcome(m: Message):
+        chat_id = m.chat.id
+        text_lines = i18n.get(chat_id, "menu_welcome").split("\n")
+        footer_text = i18n.get(chat_id, "menu_footer")
+        await safe_reply(m, ui_manager.format_panel("ReSave", text_lines, icon="⚡", footer=footer_text))
 
-    async def help_command(message: Message):
-        help_text = ui_manager.format_panel(
-            "Как пользоваться ReSave",
-            [
-                "Личные сообщения",
-                "1. Отправьте ссылку.",
-                "2. Выберите качество, MP3, GIF, субтитры или превью.",
-                "3. Дождитесь готового файла.",
-                "",
-                "Группы",
-                "1. Добавьте бота в группу.",
-                "2. Отправьте ссылку.",
-                "3. Бот скачает видео в среднем качестве.",
-                "",
-                "Если ссылка не распознается, пришлите полный URL с https://.",
-            ],
-            icon="📖",
-        )
-        await safe_reply(message, help_text)
+    async def help_command(m: Message):
+        chat_id = m.chat.id
+        text_lines = i18n.get(chat_id, "menu_help").split("\n")
+        faq_title = i18n.get(chat_id, "menu_faq")
+        await safe_reply(m, ui_manager.format_panel(faq_title, text_lines, icon="📖"))
 
-    async def status_command(message: Message):
+    async def lang_command(m: Message):
+        chat_id = m.chat.id
+        buttons = []
+        for lang_code, strings in i18n.locales.items():
+            lang_name = strings.get("_lang_name", f"🌍 {lang_code.upper()}")
+            buttons.append([InlineKeyboardButton(text=lang_name, callback_data=f"setlang_{lang_code}")])
+        kbd = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await safe_reply(m, i18n.get(chat_id, "menu_lang"), reply_markup=kbd)
+
+    async def lang_callback(c: CallbackQuery):
+        uid = c.from_user.id
+        chat_id = c.message.chat.id
+        lang = c.data.split("_")[1]
+        i18n.set_lang(uid, lang)
+        if uid != chat_id:
+            i18n.set_lang(chat_id, lang)
+        await c.message.edit_text(i18n.get(chat_id, "lang_changed"))
+        await c.answer()
+
+    async def status_command(m: Message):
         from .download_handlers import get_download_manager
-
         manager = get_download_manager()
-        if manager is None:
-            await safe_reply(message, "⚙️ Менеджер загрузок еще запускается. Повторите через пару секунд.")
-            return
-
+        chat_id = m.chat.id
+        if not manager:
+            return await safe_reply(m, i18n.get(chat_id, "status_manager_starting"))
         with manager.lock:
-            user_tasks = {
-                task_id: task
-                for task_id, task in manager.tasks.items()
-                if task.chat_id == message.chat.id and task.status in {"downloading", "pending"}
-            }
-
+            user_tasks = {tid: t for tid, t in manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
         if not user_tasks:
-            await safe_reply(
-                message,
-                ui_manager.format_panel(
-                    "Активных загрузок нет",
-                    ["Отправьте новую ссылку, и я покажу варианты скачивания."],
-                    icon="✅",
-                )
-            )
-            return
-
-        status_lines = []
-
-        for task in user_tasks.values():
-            title = task.info.get("title", "Неизвестное видео")
-
-            if task.status == "downloading":
-                progress_text = ui_manager.create_progress_bar(task.progress)
-
-                if task.started_at and task.progress > 0.05:
-                    elapsed = time.time() - task.started_at
-                    total_estimated = elapsed / task.progress
-                    remaining = total_estimated - elapsed
-                    if remaining > 0:
-                        remaining_str = f"Осталось: {manager._format_time(remaining)}"
-                    else:
-                        remaining_str = "Завершается..."
+            return await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_no_downloads"), [i18n.get(chat_id, "status_no_downloads_desc")], icon="✅"))
+        lines = []
+        for t in user_tasks.values():
+            lines.append(f"🎬 {t.info.get('title', 'Video')}")
+            if t.status == "downloading":
+                lines.append(f"⬇️ {ui_manager.create_progress_bar(t.progress)}")
+                if t.started_at and t.progress > 0.05:
+                    elapsed = time.time() - t.started_at
+                    remaining = (elapsed / t.progress) - elapsed
+                    lines.append(f"⏱️ {i18n.get(chat_id, 'status_time_left', time=manager._format_time(remaining, chat_id)) if remaining > 0 else i18n.get(chat_id, 'status_finishing')}")
                 else:
-                    remaining_str = "Вычисляется..."
-
-                status_lines.append(f"🎬 {title}")
-                status_lines.append(f"⬇️ {progress_text}")
-                status_lines.append(f"⏱️ {remaining_str}")
-                status_lines.append("")
+                    lines.append(f"⏱️ {i18n.get(chat_id, 'status_calc')}")
             else:
-                status_lines.append(f"🎬 {title}")
-                status_lines.append("⏳ В очереди")
-                status_lines.append("")
+                lines.append(f"⏳ {i18n.get(chat_id, 'status_queue')}")
+            lines.append("")
+        kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads")]])
+        await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)
 
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="❌ Отменить все",
-                        callback_data="cancel_all_downloads",
-                    )
-                ]
-            ]
-        )
-
-        await safe_reply(
-            message,
-            ui_manager.format_panel("Ваши загрузки", status_lines, icon="📦"),
-            reply_markup=keyboard,
-        )
-
-    async def cancel_download(message: Message):
+    async def cancel_download(m: Message):
         from .download_handlers import get_download_manager
-
         manager = get_download_manager()
-        if manager is None:
-            await safe_reply(message, "⚙️ Менеджер загрузок еще запускается. Повторите через пару секунд.")
-            return
-
+        chat_id = m.chat.id
+        if not manager:
+            return await safe_reply(m, i18n.get(chat_id, "status_manager_starting"))
         with manager.lock:
-            user_tasks = {
-                task_id: task
-                for task_id, task in manager.tasks.items()
-                if task.chat_id == message.chat.id and task.status in {"downloading", "pending"}
-            }
-
+            user_tasks = {tid: t for tid, t in manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
         if not user_tasks:
-            await safe_reply(
-                message,
-                ui_manager.format_panel(
-                    "Отменять нечего",
-                    ["Сейчас у вас нет активных загрузок."],
-                    icon="⏳",
-                )
-            )
-            return
+            return await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_nothing_to_cancel"), [i18n.get(chat_id, "status_no_active")], icon="⏳"))
+        cc = sum(1 for tid in user_tasks if manager.cancel_task(tid))
+        await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅"))
 
-        cancelled_count = 0
-        for task_id in user_tasks:
-            if manager.cancel_task(task_id):
-                cancelled_count += 1
-
-        await safe_reply(
-            message,
-            ui_manager.format_panel(
-                "Загрузки отменены",
-                [f"Отменено: {cancelled_count}", "Теперь можно начать новую."],
-                icon="✅",
-            )
-        )
-
-    async def stats_command(message: Message):
-        stats_manager = get_stats_manager()
-        user_stats = stats_manager.get_user_stats(message.chat.id)
-
-        stats_lines = []
-
-        if user_stats.downloads_count == 0:
-            stats_lines.extend(
-                [
-                    "Пока нет загрузок.",
-                    "Отправьте любую ссылку на видео, чтобы начать.",
-                ]
-            )
+    async def stats_command(m: Message):
+        chat_id = m.chat.id
+        stats = get_stats_manager().get_user_stats(chat_id)
+        lines = []
+        if stats.downloads_count == 0:
+            lines.append(i18n.get(chat_id, "stats_no_dl"))
         else:
-            stats_lines.extend(
-                ui_manager.format_key_value_list(
-                    [
-                        ("Всего загрузок", str(user_stats.downloads_count)),
-                        ("Видео", str(user_stats.total_videos)),
-                        ("Аудио", str(user_stats.total_audios)),
-                    ]
-                )
-            )
-            if user_stats.total_other_downloads:
-                stats_lines.append(f"• Прочее: {user_stats.total_other_downloads}")
-            stats_lines.append(f"• Общий размер: {user_stats.total_size_mb:.1f} MB")
-
-            if user_stats.failed_downloads > 0:
-                stats_lines.append(f"• Ошибок загрузок: {user_stats.failed_downloads}")
-
-            if user_stats.first_download_date:
-                first_date = datetime.fromisoformat(user_stats.first_download_date)
-                stats_lines.append(
-                    f"• Первая загрузка: {first_date.strftime('%d.%m.%Y %H:%M')}"
-                )
-
-            if user_stats.last_download_date:
-                last_date = datetime.fromisoformat(user_stats.last_download_date)
-                stats_lines.append(
-                    f"• Последняя загрузка: {last_date.strftime('%d.%m.%Y %H:%M')}"
-                )
-
-            stats_lines.append("")
-            avg_size = user_stats.total_size_mb / user_stats.downloads_count
-            stats_lines.append(f"Средний размер файла: {avg_size:.1f} MB")
-
-            total_attempts = user_stats.downloads_count + user_stats.failed_downloads
-            if total_attempts > 0:
-                success_rate = (user_stats.downloads_count / total_attempts) * 100
-                stats_lines.append(f"Успешные загрузки: {success_rate:.1f}%")
-
-        await safe_reply(
-            message,
-            ui_manager.format_panel("Ваша статистика", stats_lines, icon="📊")
-        )
+            lines.extend(ui_manager.format_key_value_list([
+                (i18n.get(chat_id, "stats_dl_count"), str(stats.downloads_count)),
+                (i18n.get(chat_id, "stats_videos"), str(stats.total_videos)),
+                (i18n.get(chat_id, "stats_size"), f"{stats.total_size_mb:.1f} MB")
+            ]))
+        await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "menu_stats"), lines, icon="📊"))
 
     router.message.register(send_welcome, CommandStart())
     router.message.register(help_command, Command("help"))
+    router.message.register(lang_command, Command("lang"))
     router.message.register(status_command, Command("status"))
     router.message.register(cancel_download, Command("cancel"))
     router.message.register(stats_command, Command("stats"))
+    router.callback_query.register(lang_callback, F.data.startswith("setlang_"))

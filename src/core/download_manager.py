@@ -1,3 +1,4 @@
+from ..utils.i18n import i18n
 import logging
 import queue
 import threading
@@ -168,7 +169,7 @@ class DownloadManager:
                                 total_estimated = elapsed / task.progress
                                 remaining = total_estimated - elapsed
                                 if remaining > 0:
-                                    remaining_str = f"Осталось: {self._format_time(remaining)}"
+                                    remaining_str = i18n.get(task.chat_id, "status_time_left", time=self._format_time(remaining, task.chat_id))
                                 else:
                                     remaining_str = ""
                             else:
@@ -176,12 +177,12 @@ class DownloadManager:
 
                             self.bot.edit_message_text(
                                 ui_manager.format_panel(
-                                    "Скачивание",
+                                    i18n.get(task.chat_id, "status_downloading"),
                                     [
                                         f"⬇️ {progress_bar}",
-                                        f"⏱️ {remaining_str}" if remaining_str else "⏱️ Время уточняется",
+                                        f"⏱️ {remaining_str}" if remaining_str else f"⏱️ {i18n.get(task.chat_id, 'status_time_calculating')}",
                                         "",
-                                        "Файл будет отправлен сразу после обработки.",
+                                        i18n.get(task.chat_id, "status_send_after_process"),
                                     ],
                                     icon="📦",
                                 ),
@@ -202,9 +203,9 @@ class DownloadManager:
         return f"{'▓' * filled}{'░' * (length - filled)}"
 
     @staticmethod
-    def _format_time(seconds):
+    def _format_time(seconds, chat_id=0):
         if seconds < 60:
-            return f"{seconds:.0f} сек"
+            return i18n.get(chat_id, "time_sec", t=f"{seconds:.0f}")
         if seconds < 3600:
-            return f"{seconds / 60:.1f} мин"
-        return f"{seconds / 3600:.1f} ч"
+            return i18n.get(chat_id, "time_min", t=f"{seconds / 60:.1f}")
+        return i18n.get(chat_id, "time_hr", t=f"{seconds / 3600:.1f}")

@@ -39,13 +39,31 @@ async def main():
             print("✅ Вход выполнен, состояние сохранено")
 
         cookies = await context.cookies()
+
+        # 🔥 СОХРАНЯЕМ ЧУЖИЕ КУКИ (Instagram и т.д.) 🔥
+        existing_cookies = []
+        if os.path.exists(COOKIE_FILE):
+            with open(COOKIE_FILE, "r") as f:
+                for line in f:
+                    if line.strip() and not line.startswith("#"):
+                        # Игнорируем старые куки ютуба и гугла, оставляем всё остальное
+                        if "youtube.com" not in line and "google.com" not in line:
+                            existing_cookies.append(line)
+
         with open(COOKIE_FILE, "w") as f:
             f.write("# Netscape HTTP Cookie File\n")
+            
+            # 1. Записываем обратно чужие куки (Инстаграм)
+            for line in existing_cookies:
+                f.write(line)
+                
+            # 2. Дописываем свежие куки YouTube
             for cookie in cookies:
                 f.write(f"{cookie['domain']}\tTRUE\t{cookie['path']}\t")
                 f.write(f"{'TRUE' if cookie.get('secure', False) else 'FALSE'}\t")
-                f.write(f"{cookie.get('expires', 0)}\t{cookie['name']}\t{cookie['value']}\n")
-        print("✅ Куки обновлены")
+                f.write(f"{int(cookie.get('expires', 0))}\t{cookie['name']}\t{cookie['value']}\n")
+                
+        print("✅ Куки обновлены (YouTube перезаписан, Instagram сохранен)")
         await browser.close()
 
 if __name__ == "__main__":

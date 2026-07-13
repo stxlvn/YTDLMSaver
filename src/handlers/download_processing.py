@@ -1,261 +1,83 @@
 from __future__ import annotations
-
 import logging
-
+import yt_dlp
 import config
-from ..core.access import (
-    build_duration_limit_error,
-    build_playlist_limit_error,
-    collect_playlist_entries,
-)
+import re
+from ..core.access import build_duration_limit_error
 from ..utils.ui_manager import get_ui_manager
+from ..utils.i18n import i18n
 
 logger = logging.getLogger(__name__)
 
-
-def queue_playlist_downloads(
-    *,
-    download_manager,
-    chat_id: int,
-    message_id: int,
-    reply_to_id: int,
-    info: dict,
-    silent_mode: bool,
-) -> int:
-    playlist_entries = collect_playlist_entries(info)
-    queued = 0
-
-    for entry in playlist_entries:
-        download_manager.add_task(
-            url=entry["resolved_url"],
-            chat_id=chat_id,
-            message_id=message_id,
-            info={
-                "id": entry.get("id"),
-                "title": entry.get("title") or "video",
-                "uploader": entry.get("uploader") or info.get("uploader"),
-                "duration": entry.get("duration"),
-            },
-            action="medium",
-            reply_to_id=reply_to_id,
-            silent_mode=silent_mode,
-        )
-        queued += 1
-
-    return queued
-
-
-def build_playlist_queued_text(info: dict, queued_count: int) -> str:
-    ui_manager = get_ui_manager()
-    playlist_title = info.get("title") or "Плейлист"
-    return ui_manager.format_panel(
-        "Плейлист в очереди",
-        [
-            f"Название: {playlist_title}",
-            f"Видео в очереди: {queued_count}",
-            "Качество: 720p",
-            "",
-            "Файлы будут приходить по мере готовности.",
-        ],
-        icon="🎶",
-    )
-
+# Универсальный фильтр для ЛЮБЫХ ссылок внутри Telegram
+def is_telegram_link(url: str) -> bool:
+    return bool(re.match(r'^https?://(t\.me|telegram\.me)/', url))
 
 def handle_group_download(url: str, chat_id: int, message_id: int, download_manager):
+    # Мгновенно отсекаем ссылки t.me (посты, каналы, файлы)
+    if is_telegram_link(url):
+        return
+        
+    bot = download_manager.bot
+    s_msg = bot.send_message(chat_id, i18n.get(chat_id, "status_analysis_start"))
     try:
         from ..core.tiktok_photo_handler import is_tiktok_photo_url
-
         if is_tiktok_photo_url(url):
-            download_manager.add_task(
-                url=url,
-                chat_id=chat_id,
-                message_id=message_id,
-                info={"title": "TikTok photo", "duration": None},
-                action="tiktok_photo",
-                reply_to_id=message_id,
-                silent_mode=True,
-            )
+            download_manager.add_task(url=url, chat_id=chat_id, message_id=message_id, info={"title": "TikTok photo", "duration": None}, action="tiktok_photo", reply_to_id=message_id, silent_mode=True)
+            bot.delete_message(chat_id, s_msg.message_id)
             return
 
-        import yt_dlp
-
+        bot.edit_message_text(i18n.get(chat_id, "status_analyzing"), chat_id, s_msg.message_id)
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "skip_download": True,
             "socket_timeout": 30,
             "cookiefile": config.COOKIES_FILE,
             "nocheckcertificate": True,
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
+        
         if not info:
-            logger.warning("Не удалось получить информацию для %s в группе %s", url, chat_id)
+            try: bot.delete_message(chat_id, s_msg.message_id)
+            except Exception: pass
             return
-
-        if info.get("_type") == "playlist":
-            playlist_entries = collect_playlist_entries(info)
-            playlist_error = build_playlist_limit_error(chat_id, len(playlist_entries))
-            if playlist_error:
-                logger.info("Плейлист %s в группе %s отклонен: %s", url, chat_id, playlist_error)
-                return
-            queue_playlist_downloads(
-                download_manager=download_manager,
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_to_id=message_id,
-                info=info,
-                silent_mode=True,
-            )
-            return
-
-        duration_error = build_duration_limit_error(chat_id, info.get("duration"))
-        if duration_error:
-            logger.info("Ссылка %s в группе %s отклонена: %s", url, chat_id, duration_error)
-            return
-
-        download_manager.add_task(
-            url=url,
-            chat_id=chat_id,
-            message_id=message_id,
-            info=info,
-            action="medium",
-            reply_to_id=message_id,
-            silent_mode=True,
-        )
+        
+        download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info=info, action="medium", reply_to_id=message_id, silent_mode=False)
+        
     except Exception as exc:
-        # A group may contain arbitrary links. Unsupported or protected pages are
-        # expected input, not an application failure.
-        logger.info("Ссылка из группы %s не поддерживается: %s", chat_id, exc)
+        error_text = str(exc)
+        if "Unsupported URL" not in error_text:
+            logger.error(f"Group {chat_id}: Ошибка: {error_text}")
+            
+        try: bot.delete_message(chat_id, s_msg.message_id)
+        except Exception: pass
 
-
-def extract_video_info(
-    bot,
-    chat_id: int,
-    user_message_id: int,
-    url: str,
-    status_message_id: int,
-    cache: dict[int, dict],
-    *,
-    download_manager,
-    build_download_limit_text,
-    build_download_markup,
-):
+def extract_video_info(bot, chat_id: int, user_message_id: int, url: str, status_message_id: int, cache: dict[int, dict], *, download_manager, build_download_limit_text, build_download_markup):
     ui_manager = get_ui_manager()
+    
+    # В личных сообщениях тоже блокируем Telegram-ссылки
+    if is_telegram_link(url):
+        try: bot.delete_message(chat_id, status_message_id)
+        except Exception: pass
+        return
+
     try:
         from ..core.video_info import fetch_video_info
-
         info = fetch_video_info(url)
         if not info:
-            bot.edit_message_text(
-                ui_manager.format_panel(
-                    "Не удалось прочитать ссылку",
-                    ["Проверьте доступность видео и отправьте ссылку еще раз."],
-                    icon="❌",
-                ),
-                chat_id,
-                status_message_id,
-            )
+            bot.edit_message_text(ui_manager.format_panel(i18n.get(chat_id, "status_link_unreadable"), [i18n.get(chat_id, "status_link_unreadable_desc")], icon="❌"), chat_id, status_message_id)
             return
-
-        if info.get("_type") == "playlist":
-            playlist_entries = collect_playlist_entries(info)
-            playlist_error = build_playlist_limit_error(chat_id, len(playlist_entries))
-            if playlist_error:
-                bot.edit_message_text(
-                    playlist_error,
-                    chat_id,
-                    status_message_id,
-                )
-                return
-
-            try:
-                queued_count = queue_playlist_downloads(
-                    download_manager=download_manager,
-                    chat_id=chat_id,
-                    message_id=status_message_id,
-                    reply_to_id=user_message_id,
-                    info=info,
-                    silent_mode=True,
-                )
-            except ValueError:
-                bot.edit_message_text(
-                    build_download_limit_text(chat_id),
-                    chat_id,
-                    status_message_id,
-                )
-                return
-
-            if queued_count == 0:
-                bot.edit_message_text(
-                    "🎶 Не удалось извлечь элементы плейлиста.",
-                    chat_id,
-                    status_message_id,
-                )
-                return
-
-            bot.edit_message_text(
-                build_playlist_queued_text(info, queued_count),
-                chat_id,
-                status_message_id,
-            )
-            return
-
-        duration_error = build_duration_limit_error(chat_id, info.get("duration"))
-        if duration_error:
-            bot.edit_message_text(
-                duration_error,
-                chat_id,
-                status_message_id,
-            )
-            return
-
-        resolutions: dict[int, dict] = {}
-        for item in info.get("formats", []):
-            height = item.get("height")
-            if height and item.get("vcodec", "none") != "none":
-                existing = resolutions.get(height)
-                if existing is None or (item.get("filesize") or 0) > (existing.get("filesize") or 0):
-                    resolutions[height] = item
-
-        cache[user_message_id] = {
-            "url": url,
-            "info": info,
-            "resolutions": resolutions,
-            "chat_id": chat_id,
-        }
-
-        markup = build_download_markup(user_message_id, info, resolutions)
-        lines = [f"🎬 {info.get('title', 'video')}"]
-
-        if info.get("uploader"):
-            lines.append(f"👤 {info['uploader']}")
-
-        if info.get("duration"):
-            minutes, seconds = divmod(int(info["duration"]), 60)
-            lines.append(f"⏱️ {minutes:02d}:{seconds:02d}")
-
-        lines.extend(["", "Выберите формат ниже."])
-        bot.edit_message_text(
-            ui_manager.format_panel("Видео найдено", lines, icon="✅"),
-            chat_id,
-            status_message_id,
-            reply_markup=markup,
-        )
+        
+        resolutions = {item.get("height"): item for item in info.get("formats", []) if item and item.get("height") and item.get("vcodec") != "none"}
+        cache[user_message_id] = {"url": url, "info": info, "resolutions": resolutions, "chat_id": chat_id}
+        bot.edit_message_text(ui_manager.format_panel(i18n.get(chat_id, "status_found_title"), [f"🎬 {info.get('title', 'video')}", "", i18n.get(chat_id, "status_found_desc")], icon="✅"), chat_id, status_message_id, reply_markup=build_download_markup(user_message_id, info, resolutions))
     except Exception as exc:
-        error_message = str(exc)
-        if "This video is unavailable" in error_message:
-            user_text = "❌ Это видео недоступно."
-        elif "Private video" in error_message:
-            user_text = "❌ Это приватное видео."
+        error_text = str(exc)
+        if "Unsupported URL" in error_text:
+            try: bot.delete_message(chat_id, status_message_id)
+            except Exception: pass
         else:
-            user_text = ui_manager.format_panel(
-                "Ошибка обработки",
-                [error_message],
-                icon="❌",
-            )
-
-        bot.edit_message_text(user_text, chat_id, status_message_id)
-        logger.error("Ошибка при получении информации о видео %s: %s", url, exc)
+            bot.edit_message_text(ui_manager.format_panel(i18n.get(chat_id, "status_processing_err"), [error_text], icon="❌"), chat_id, status_message_id)
+            logger.error("Ошибка extract_video_info: %s", exc)

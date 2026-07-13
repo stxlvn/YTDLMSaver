@@ -22,7 +22,9 @@ database.db
 *.sqlite
 *.sqlite3
 user_stats.json
+po_token.txt
 
 test_config.py
 venv/
 __pycache__/
+.env*

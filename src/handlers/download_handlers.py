@@ -1,384 +1,162 @@
 import asyncio
 import logging
-
+import re
 import config
 from aiogram import Router
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
-
-from .download_processing import (
-    extract_video_info as _extract_video_info,
-    handle_group_download as _handle_group_download,
-)
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from .download_processing import extract_video_info as _extract_video_info, handle_group_download as _handle_group_download
 from ..utils.message_templates import ErrorMessages
 from ..utils.ui_manager import get_ui_manager
+from ..utils.i18n import i18n
 
 logger = logging.getLogger(__name__)
-
-
 _download_manager = None
-
 
 def set_download_manager(manager):
     global _download_manager
     _download_manager = manager
 
-
-def get_download_manager():
-    return _download_manager
-
+def get_download_manager(): return _download_manager
 
 def _build_download_limit_text(chat_id: int) -> str:
-    ui_manager = get_ui_manager()
-    active_downloads = _download_manager.get_user_task_count(chat_id) if _download_manager else 0
-    return ui_manager.format_panel(
-        "Лимит активных загрузок",
-        [
-            ErrorMessages.CONCURRENT_LIMIT,
-            "",
-            f"Активных загрузок: {active_downloads}/{config.MAX_DOWNLOADS_PER_USER}",
-        ],
-        icon="⏸️",
-    )
+    active = _download_manager.get_user_task_count(chat_id) if _download_manager else 0
+    return get_ui_manager().format_panel(i18n.get(chat_id, "limit_title"), [i18n.get(chat_id, "err_concurrent"), "", i18n.get(chat_id, "limit_active", active=active, max=config.MAX_DOWNLOADS_PER_USER)], icon="⏸️")
 
+def get_markup_builder(chat_id):
+    def builder(message_id, info, resolutions):
+        url = info.get("webpage_url") or info.get("original_url")
+        available_actions = ["best", "medium", "low", "audio", "gif"]
+        if url:
+            try:
+                from src.core.download_handler import get_available_actions_optimized
+                available_actions, info = get_available_actions_optimized(url)
+            except Exception: pass
 
-def _build_download_markup(message_id: int, info: dict, resolutions: dict[int, dict]) -> InlineKeyboardMarkup:
-    url = info.get("webpage_url") or info.get("original_url")
-    available_actions = ["best", "medium", "low", "audio", "gif"]
-    
-    if url:
-        try:
-            from src.core.download_handler import get_available_actions_optimized
-            available_actions, info = get_available_actions_optimized(url)
-        except Exception as e:
-            logger.warning(f"Size filter error: {e}")
-
-    # 🔥 РАДИКАЛЬНАЯ ФИЛЬТРАЦИЯ: удаляем "best" при любом 4K формате
-    formats = info.get("formats", []) if info else []
-    has_4k = any(f.get("height", 0) >= 2160 for f in formats if f.get("vcodec") != "none")
-    
-    if has_4k:
-        if "best" in available_actions:
+        formats = info.get("formats", []) if info else []
+        if any(f and f.get("height", 0) >= 2160 for f in formats if f and f.get("vcodec") != "none") and "best" in available_actions:
             available_actions.remove("best")
-        logger.info("4K format detected. 'best' button forcefully removed.")
 
-    # Фильтруем разрешения для отображения
-    filtered_resolutions = {}
-    for h, d in resolutions.items():
-        if h > 720 and "best" not in available_actions: continue
-        if h > 480 and h <= 720 and "medium" not in available_actions: continue
-        if h <= 480 and "low" not in available_actions: continue
-        filtered_resolutions[h] = d
+        filtered_res = {h: d for h, d in resolutions.items() if not (h > 720 and "best" not in available_actions) and not (h > 480 and h <= 720 and "medium" not in available_actions) and not (h <= 480 and "low" not in available_actions)}
 
-    rows: list[list[InlineKeyboardButton]] = []
-    youtube_resolutions = _youtube_resolution_buttons(message_id, info, filtered_resolutions)
-    
-    if youtube_resolutions:
-        rows.extend(youtube_resolutions)
-    else:
-        fallback_buttons = []
-        if "best" in available_actions:
-            fallback_buttons.append([InlineKeyboardButton(text="🎬 Максимум", callback_data=f"dl_best_{message_id}")])
-        med_low_row = []
-        if "medium" in available_actions:
-            med_low_row.append(InlineKeyboardButton(text="📹 720p", callback_data=f"dl_medium_{message_id}"))
-        if "low" in available_actions:
-            med_low_row.append(InlineKeyboardButton(text="📱 480p", callback_data=f"dl_low_{message_id}"))
-        if med_low_row:
-            fallback_buttons.append(med_low_row)
-        rows.extend(fallback_buttons)
+        rows = []
+        is_yt = "youtube" in str(info.get("extractor_key") or "").lower() or "youtu" in str(url).lower()
+        if is_yt and filtered_res:
+            pref = [4320, 2160, 1440, 1080, 720, 480, 360]
+            av = [h for h in pref if h in filtered_res]
+            ex = [h for h in sorted(filtered_res.keys(), reverse=True) if h not in av]
+            btns = [InlineKeyboardButton(text=i18n.get(chat_id, "btn_res", height=h), callback_data=f"dl_res_{h}_{message_id}") for h in (av + ex)[:6]]
+            rows.extend([btns[i:i+2] for i in range(0, len(btns), 2)])
+        else:
+            fb = []
+            if "best" in available_actions: fb.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_max"), callback_data=f"dl_best_{message_id}")])
+            ml = []
+            if "medium" in available_actions: ml.append(InlineKeyboardButton(text=i18n.get(chat_id, "btn_720"), callback_data=f"dl_medium_{message_id}"))
+            if "low" in available_actions: ml.append(InlineKeyboardButton(text=i18n.get(chat_id, "btn_480"), callback_data=f"dl_low_{message_id}"))
+            if ml: fb.append(ml)
+            rows.extend(fb)
 
-    if "audio" in available_actions:
-        rows.append([InlineKeyboardButton(text="🎵 MP3", callback_data=f"dl_audio_{message_id}", style="primary")])
-
-    duration = info.get("duration")
-    if duration and duration <= 30 and "gif" in available_actions:
-        rows.append([InlineKeyboardButton(text="✨ GIF", callback_data=f"dl_gif_{message_id}")])
-
-    subtitles = info.get("subtitles", {})
-    auto_captions = info.get("automatic_captions", {})
-    if subtitles or auto_captions:
-        rows.append([InlineKeyboardButton(text="📝 Субтитры", callback_data=f"dl_subtitles_{message_id}", style="primary")])
-
-    if info.get("thumbnail"):
-        rows.append([InlineKeyboardButton(text="🖼️ Превью", callback_data=f"dl_thumbnail_{message_id}", style="success")])
-
-    rows.append([InlineKeyboardButton(text="✕ Отмена", callback_data=f"cancel_{message_id}", style="danger")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-def _youtube_resolution_buttons(
-    message_id: int,
-    info: dict,
-    resolutions: dict[int, dict],
-) -> list[list[InlineKeyboardButton]]:
-    webpage_url = (info.get("webpage_url") or info.get("original_url") or "").lower()
-    extractor = (info.get("extractor_key") or info.get("extractor") or "").lower()
-    is_youtube = "youtube" in extractor or "youtu.be" in webpage_url or "youtube.com" in webpage_url
-    if not is_youtube or not resolutions:
-        return []
-
-    preferred_order = [4320, 2160, 1440, 1080, 720, 480, 360]
-    available = [height for height in preferred_order if height in resolutions]
-    extra = [height for height in sorted(resolutions.keys(), reverse=True) if height not in available]
-    heights = (available + extra)[:6]
-
-    buttons = [
-        InlineKeyboardButton(
-            text=f"🎥 {height}p",
-            callback_data=f"dl_res_{height}_{message_id}",
-        )
-        for height in heights
-    ]
-
-    rows: list[list[InlineKeyboardButton]] = []
-    for index in range(0, len(buttons), 2):
-        rows.append(buttons[index:index + 2])
-    return rows
-
+        if "audio" in available_actions: rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_audio"), callback_data=f"dl_audio_{message_id}", style="primary")])
+        if info.get("duration", 999) <= 30 and "gif" in available_actions: rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_gif"), callback_data=f"dl_gif_{message_id}")])
+        if info.get("subtitles") or info.get("automatic_captions"): rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_subs"), callback_data=f"dl_subtitles_{message_id}", style="primary")])
+        if info.get("thumbnail"): rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_thumb"), callback_data=f"dl_thumbnail_{message_id}", style="success")])
+        rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel"), callback_data=f"cancel_{message_id}", style="danger")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+    return builder
 
 def register_download_handlers(router: Router, sync_bot):
     ui_manager = get_ui_manager()
-    video_info_cache: dict[int, dict] = {}
+    video_info_cache = {}
 
     async def process_url_message(message: Message):
         from ..utils.url_validator import get_url_validator
-
-        if message.from_user and message.from_user.is_bot:
-            return
-
+        if message.from_user and message.from_user.is_bot: return
         text = (message.text or message.caption or "").strip()
-        if not text:
-            return
+        if not text or text.startswith("/"): return
 
-        if text.startswith("/"):
-            return
+        validator = get_url_validator()
+        extracted_url = next((getattr(e, "url", None) for e in [* (message.entities or []), *(message.caption_entities or [])] if getattr(e, "url", None)), None)
+        extracted_url = extracted_url or validator.extract_url(text)
+        is_valid, corrected_url, metadata = validator.validate(extracted_url or "")
+        chat_id = message.chat.id
 
-        url_validator = get_url_validator()
-        extracted_url = None
-        for entity in [*(message.entities or []), *(message.caption_entities or [])]:
-            entity_url = getattr(entity, "url", None)
-            if entity_url:
-                extracted_url = entity_url
-                break
-
-        extracted_url = extracted_url or url_validator.extract_url(text)
-        is_valid, corrected_url, metadata = url_validator.validate(extracted_url or "")
         if not is_valid:
             if message.chat.type == "private":
-                await message.reply(
-                    ui_manager.format_panel(
-                        "Ссылка не распознана",
-                        [
-                            "Пришлите обычный URL с http:// или https://.",
-                            "Если источник поддерживается yt-dlp, я попробую скачать видео.",
-                        ],
-                        icon="🔗",
-                    )
-                )
+                await message.reply(ui_manager.format_panel(i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"))
             return
 
         url = corrected_url or extracted_url
+
+        is_ig = "instagram.com/p/" in url.lower()
         from ..core.tiktok_photo_handler import is_tiktok_photo_url
+        is_tt = is_tiktok_photo_url(url) or ('tiktok.com' in url.lower() and '/photo/' in url.lower())
+
+        if is_tt or is_ig:
+            if is_tt and '/photo/' in url.lower(): url = re.sub(r'/photo/', '/video/', url, flags=re.IGNORECASE)
+            s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_photo_title"), [i18n.get(chat_id, "status_photo_desc")], icon="🖼️"))
+            
+            # Фоновый сбор оригинального текста для картинок перед стартом загрузки
+            def _bg_photo_task():
+                from src.core.video_info import fetch_video_info
+                info = fetch_video_info(url) or {}
+                try:
+                    _download_manager.add_task(
+                        url=url,
+                        chat_id=chat_id,
+                        message_id=s_msg.message_id,
+                        info={"title": info.get("title", ""), "description": info.get("description", ""), "duration": None},
+                        action="tiktok_photo" if is_tt else "instagram_photo",
+                        reply_to_id=message.message_id
+                    )
+                except ValueError:
+                    try: sync_bot.edit_message_text(_build_download_limit_text(chat_id), chat_id, s_msg.message_id)
+                    except Exception: pass
+
+            asyncio.create_task(asyncio.to_thread(_bg_photo_task))
+            return
+
+        if any(x in url.lower() for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts']):
+            s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fast_title"), [i18n.get(chat_id, "status_fast_desc")], icon="⚡"))
+            try: _download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info={"title": "", "duration": None}, action="best", reply_to_id=message.message_id)
+            except ValueError: await s_msg.edit_text(_build_download_limit_text(chat_id))
+            return
 
         if message.chat.type in {"group", "supergroup"}:
-            logger.info("Получена ссылка в группе %s: %s", message.chat.id, url)
-            asyncio.create_task(
-                asyncio.to_thread(
-                    handle_group_download,
-                    url,
-                    message.chat.id,
-                    message.message_id,
-                )
-            )
+            asyncio.create_task(asyncio.to_thread(_handle_group_download, url, chat_id, message.message_id, download_manager=_download_manager))
             return
 
-        if is_tiktok_photo_url(url):
-            status_message = await message.reply(
-                ui_manager.format_panel(
-                    "TikTok photo",
-                    ["Добавляю фото-пост в очередь."],
-                    icon="🖼️",
-                )
-            )
-            try:
-                _download_manager.add_task(
-                    url=url,
-                    chat_id=message.chat.id,
-                    message_id=status_message.message_id,
-                    info={"title": "TikTok photo", "duration": None},
-                    action="tiktok_photo",
-                    reply_to_id=message.message_id,
-                )
-            except ValueError:
-                await status_message.edit_text(_build_download_limit_text(message.chat.id))
-            return
-
-        if metadata.get("fixed"):
-            logger.info("Ссылка исправлена: %s", metadata.get("fix_type"))
-            status_message = await message.reply(
-                ui_manager.format_panel(
-                    "Ссылка исправлена",
-                    ["Ищу информацию о видео. Обычно это занимает несколько секунд."],
-                    icon="✅",
-                )
-            )
-        else:
-            status_message = await message.reply(
-                ui_manager.format_panel(
-                    "Ищу видео",
-                    ["Проверяю ссылку и доступные форматы."],
-                    icon="🔍",
-                )
-            )
-
-        asyncio.create_task(
-            asyncio.to_thread(
-                extract_video_info,
-                sync_bot,
-                message.chat.id,
-                message.message_id,
-                url,
-                status_message.message_id,
-                video_info_cache,
-            )
-        )
-
-    async def handle_url(message: Message):
-        await process_url_message(message)
+        s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fix_title" if metadata.get("fixed") else "status_search_title"), [i18n.get(chat_id, "status_fix_desc" if metadata.get("fixed") else "status_search_desc")], icon="✅ " if metadata.get("fixed") else "🔍"))
+        asyncio.create_task(asyncio.to_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, download_manager=_download_manager, build_download_limit_text=_build_download_limit_text, build_download_markup=get_markup_builder(chat_id)))
 
     async def handle_download(call: CallbackQuery):
-        if not call.data or not call.message:
-            return
-
         parts = call.data.split("_")
-        action = parts[1]
-        original_message_id = int(parts[-1])
+        action, orig_id = parts[1], int(parts[-1])
+        chat_id = call.message.chat.id
+        if orig_id not in video_info_cache: return await call.answer(i18n.get(chat_id, "err_expired"))
+        dl_info = video_info_cache[orig_id]
+        if not _download_manager.can_add_task(chat_id):
+            await call.answer(i18n.get(chat_id, "err_limit_alert"), show_alert=True)
+            return await call.message.edit_text(_build_download_limit_text(chat_id))
+        await call.answer(i18n.get(chat_id, "status_add_queue_alert"))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_add_queue_title"), [i18n.get(chat_id, "status_add_queue_desc")], icon="📥"))
+        try: _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None)
+        except ValueError: return await call.message.edit_text(_build_download_limit_text(chat_id))
+        video_info_cache.pop(orig_id, None)
 
-        if original_message_id not in video_info_cache:
-            await call.answer("❌ Информация устарела. Отправьте ссылку заново.")
-            return
-
-        download_info = video_info_cache[original_message_id]
-        if not _download_manager.can_add_task(call.message.chat.id):
-            await call.answer("Лимит активных загрузок достигнут.", show_alert=True)
-            await call.message.edit_text(_build_download_limit_text(call.message.chat.id))
-            return
-
-        await call.answer("Начинаю скачивание.")
-        await call.message.edit_text(
-            ui_manager.format_panel(
-                "Добавляю в очередь",
-                ["Загрузка начнется автоматически."],
-                icon="📥",
-            )
-        )
-
-        format_param = int(parts[2]) if action == "res" else None
-        url = download_info["url"]
-        try:
-            _download_manager.add_task(
-                url=url,
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                info=download_info["info"],
-                action=action,
-                format_param=format_param,
-            )
-        except ValueError:
-            await call.message.edit_text(_build_download_limit_text(call.message.chat.id))
-            return
-
-        video_info_cache.pop(original_message_id, None)
-
-    async def handle_cancel_all_downloads(call: CallbackQuery):
-        if not call.message:
-            return
-
+    async def handle_cancel_all(call: CallbackQuery):
+        chat_id = call.message.chat.id
         with _download_manager.lock:
-            user_tasks = {
-                task_id: task
-                for task_id, task in _download_manager.tasks.items()
-                if task.chat_id == call.message.chat.id and task.status in {"downloading", "pending"}
-            }
-
-        if not user_tasks:
-            await call.answer("Нет активных загрузок для отмены.")
-            return
-
-        cancelled_count = 0
-        for task_id in user_tasks:
-            if _download_manager.cancel_task(task_id):
-                cancelled_count += 1
-
-        await call.answer(f"Отменено {cancelled_count} загрузок.")
-        await call.message.edit_text(
-            ui_manager.format_panel(
-                "Загрузки отменены",
-                [f"Отменено: {cancelled_count}", "Можно отправить новую ссылку."],
-                icon="✅",
-            )
-        )
+            user_tasks = {tid: t for tid, t in _download_manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
+        if not user_tasks: return await call.answer(i18n.get(chat_id, "status_no_active"))
+        cc = sum(1 for tid in user_tasks if _download_manager.cancel_task(tid))
+        await call.answer(i18n.get(chat_id, "status_cancelled_count", count=cc))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅ "))
 
     async def handle_cancel(call: CallbackQuery):
-        if not call.message:
-            return
+        await call.answer()
+        try: await call.message.delete()
+        except Exception: await call.message.edit_text(ui_manager.format_panel("Отменено", icon="✕"))
 
-        await call.answer("Запрос отменен.")
-        try:
-            await call.message.delete()
-        except Exception:
-            await call.message.edit_text(
-                ui_manager.format_panel("Запрос отменен", icon="✕")
-            )
-
-    router.message.register(
-        handle_url,
-        lambda message: bool(
-            (message.text or message.caption)
-            and not (message.text or message.caption or "").strip().startswith("/")
-        ),
-    )
-    router.callback_query.register(
-        handle_download,
-        lambda call: bool(call.data and call.data.startswith("dl_")),
-    )
-    router.callback_query.register(
-        handle_cancel_all_downloads,
-        lambda call: call.data == "cancel_all_downloads",
-    )
-    router.callback_query.register(
-        handle_cancel,
-        lambda call: bool(call.data and call.data.startswith("cancel_")),
-    )
-
-def handle_group_download(url: str, chat_id: int, message_id: int):
-    _handle_group_download(
-        url,
-        chat_id,
-        message_id,
-        download_manager=_download_manager,
-    )
-
-
-def extract_video_info(
-    bot,
-    chat_id: int,
-    user_message_id: int,
-    url: str,
-    status_message_id: int,
-    cache: dict[int, dict],
-):
-    _extract_video_info(
-        bot,
-        chat_id,
-        user_message_id,
-        url,
-        status_message_id,
-        cache,
-        download_manager=_download_manager,
-        build_download_limit_text=_build_download_limit_text,
-        build_download_markup=_build_download_markup,
-    )
+    router.message.register(process_url_message, lambda m: bool((m.text or m.caption) and not (m.text or m.caption or "").strip().startswith("/")))
+    router.callback_query.register(handle_download, lambda c: bool(c.data and c.data.startswith("dl_")))
+    router.callback_query.register(handle_cancel_all, lambda c: c.data == "cancel_all_downloads")
+    router.callback_query.register(handle_cancel, lambda c: bool(c.data and c.data.startswith("cancel_")))
