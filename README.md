@@ -52,6 +52,8 @@ BOT_API_BASE_URL=http://127.0.0.1:8081
 BOT_API_IS_LOCAL=true
 MAX_FILE_SIZE=2097152000
 SEND_AS_DOC_LIMIT=2097152000
+MAX_DOWNLOAD_HEIGHT=720
+DOWNLOAD_RATE_LIMIT_BYTES=2097152
 TELEGRAM_API_ID=ваш_api_id
 TELEGRAM_API_HASH=ваш_api_hash
 ```
@@ -134,6 +136,8 @@ TELEGRAM_API_ID=ваш_api_id
 TELEGRAM_API_HASH=ваш_api_hash
 MAX_FILE_SIZE=2097152000
 SEND_AS_DOC_LIMIT=2097152000
+MAX_DOWNLOAD_HEIGHT=720
+DOWNLOAD_RATE_LIMIT_BYTES=2097152
 MAX_CONCURRENT_DOWNLOADS=1
 MAX_DOWNLOADS_PER_USER=1
 ```
@@ -156,9 +160,7 @@ bash /home/renothing/ReSave/scripts/run_alwaysdata_local_bot_api.sh
 bash -c 'export BOT_API_BIN=$HOME/telegram-bot-api/bin/telegram-bot-api && bash /home/renothing/ReSave/scripts/run_alwaysdata_local_bot_api.sh'
 ```
 
-Скрипт поднимает Bot API на `127.0.0.1:8081`, поэтому он доступен только боту
-внутри этого же Service-процесса. Это безопаснее, чем открывать порт сервиса
-наружу.
+Скрипт поднимает Bot API на `127.0.0.1:8081`, поэтому он доступен только боту внутри этого же Service-процесса. Это безопаснее, чем открывать порт сервиса наружу.
 
 ### Cookies для `yt-dlp` (опционально)
 
@@ -183,6 +185,7 @@ python main.py
 | `MAX_CONCURRENT_DOWNLOADS` | Лимит одновременных загрузок |
 | `MAX_DOWNLOADS_PER_USER` | Лимит активных загрузок на пользователя |
 | `MAX_FILE_SIZE`, `SEND_AS_DOC_LIMIT` | Ограничения по размеру и порог отправки как документа |
+| `MAX_DOWNLOAD_HEIGHT`, `DOWNLOAD_RATE_LIMIT_BYTES` | Ограничение качества и скорости `yt-dlp`, чтобы shared-хостинг не убивал процесс |
 | `BOT_API_BASE_URL`, `BOT_API_IS_LOCAL` | Адрес локального Bot API для отправки файлов до 2000 MB |
 | `MAX_VIDEO_DURATION_FREE`, `MAX_VIDEO_DURATION_PREMIUM` | Лимит длительности для free/premium |
 | `MAX_PLAYLIST_ITEMS_FREE`, `MAX_PLAYLIST_ITEMS_PREMIUM` | Лимит элементов плейлиста для free/premium |

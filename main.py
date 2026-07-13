@@ -36,22 +36,16 @@ class UnicodeStreamHandler(logging.StreamHandler):
             self.stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 
-class SkipInfoFilter(logging.Filter):
-    def filter(self, record):
-        return record.levelno != logging.INFO
-
-
 _file_handler = logging.FileHandler("bot.log", encoding="utf-8")
 _stream_handler = UnicodeStreamHandler()
-for _handler in (_file_handler, _stream_handler):
-    _handler.addFilter(SkipInfoFilter())
-
+_log_level = getattr(logging, config.LOG_LEVEL, logging.INFO)
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=_log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[_file_handler, _stream_handler],
 )
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -153,6 +147,11 @@ async def run():
         )
 
     bot = Bot(token=settings.bot_token, session=session)
+    cloud_upload_bot = (
+        Bot(token=settings.bot_token)
+        if settings.bot_api_base_url and settings.bot_api_is_local
+        else None
+    )
     dispatcher = Dispatcher(storage=MemoryStorage())
     router = Router()
 
@@ -160,7 +159,11 @@ async def run():
         await ensure_bot_api_available(bot, settings)
 
         sync_bot = TelegramBotWrapper(
-            AiogramSyncBotAdapter(bot=bot, loop=asyncio.get_running_loop())
+            AiogramSyncBotAdapter(
+                bot=bot,
+                loop=asyncio.get_running_loop(),
+                cloud_upload_bot=cloud_upload_bot,
+            )
         )
 
         logger.info("Проверка FFmpeg...")
@@ -193,6 +196,8 @@ async def run():
             allowed_updates=dispatcher.resolve_used_update_types(),
         )
     finally:
+        if cloud_upload_bot:
+            await cloud_upload_bot.session.close()
         await bot.session.close()
 
 

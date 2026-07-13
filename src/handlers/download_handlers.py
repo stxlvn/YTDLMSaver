@@ -1,8 +1,12 @@
 import asyncio
 import logging
 import re
+from urllib.parse import urlsplit, urlunsplit
+
 import config
 from aiogram import Router
+from aiogram.filters import StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from .download_processing import extract_video_info as _extract_video_info, handle_group_download as _handle_group_download
 from ..utils.message_templates import ErrorMessages
@@ -10,6 +14,15 @@ from ..utils.ui_manager import get_ui_manager
 from ..utils.i18n import i18n
 
 logger = logging.getLogger(__name__)
+
+HTTP_URL_RE = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
+BARE_URL_RE = re.compile(
+    r"(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}"
+    r"(?:/[^\s<>\"'`]*)?",
+    re.IGNORECASE,
+)
+SUPPORTED_SCHEMES = {"http", "https"}
+
 _download_manager = None
 
 def set_download_manager(manager):
@@ -63,37 +76,183 @@ def get_markup_builder(chat_id):
         return InlineKeyboardMarkup(inline_keyboard=rows)
     return builder
 
+
+# --- Извлечение и нормализация URL из сообщения (из origin/main) ---
+# Умеет доставать голые ссылки без http://, чистит мусор по краям и
+# нормализует mobile.twitter.com/m.x.com в twitter.com для консистентности.
+
+def _extract_url_from_entities(text: str, entities) -> str | None:
+    for entity in entities or []:
+        entity_url = getattr(entity, "url", None)
+        if entity_url:
+            return entity_url
+
+        if getattr(entity, "type", None) != "url":
+            continue
+
+        extract_from = getattr(entity, "extract_from", None)
+        if callable(extract_from):
+            return extract_from(text)
+
+    return None
+
+
+def _clean_download_target(value: str) -> str:
+    target = value.strip().rstrip(".,;:!?)»”’]")
+
+    if "://" not in target and "." in target.split("/", 1)[0]:
+        target = f"https://{target}"
+
+    try:
+        parsed = urlsplit(target)
+    except ValueError:
+        return target
+
+    host = (parsed.hostname or "").lower()
+    twitter_hosts = {
+        "x.com",
+        "www.x.com",
+        "mobile.x.com",
+        "m.x.com",
+        "twitter.com",
+        "www.twitter.com",
+        "mobile.twitter.com",
+        "m.twitter.com",
+    }
+    if host in twitter_hosts:
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if (
+            len(path_parts) >= 3
+            and path_parts[1] in {"status", "statuses"}
+            and path_parts[2].isdigit()
+        ):
+            return urlunsplit(
+                (
+                    parsed.scheme,
+                    "twitter.com",
+                    f"/{path_parts[0]}/status/{path_parts[2]}",
+                    "",
+                    "",
+                )
+            )
+
+    return target
+
+
+def _is_probably_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+
+    if parsed.scheme and parsed.scheme.lower() not in SUPPORTED_SCHEMES:
+        return False
+
+    host = parsed.hostname or ""
+    if not parsed.scheme and not host:
+        return False
+
+    if host == "localhost":
+        return True
+
+    if "." not in host:
+        return False
+
+    try:
+        ascii_host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if ascii_host != host.lower():
+        return False
+
+    labels = ascii_host.split(".")
+    tld = labels[-1]
+    if len(tld) < 2 or len(tld) > 24:
+        return False
+
+    return all(
+        label
+        and len(label) <= 63
+        and re.fullmatch(r"[a-z0-9-]+", label, re.IGNORECASE)
+        and not label.startswith("-")
+        and not label.endswith("-")
+        for label in labels
+    )
+
+
+def _extract_download_target(text: str, entities, caption_entities) -> str | None:
+    entity_url = (
+        _extract_url_from_entities(text, entities)
+        or _extract_url_from_entities(text, caption_entities)
+    )
+    if entity_url:
+        target = _clean_download_target(entity_url)
+        return target if _is_probably_url(target) else None
+
+    match = HTTP_URL_RE.search(text) or BARE_URL_RE.search(text)
+    if match:
+        target = _clean_download_target(match.group(0))
+        return target if _is_probably_url(target) else None
+
+    if (
+        not any(char.isspace() for char in text)
+        and ("://" in text or text.lower().startswith("www."))
+    ):
+        target = _clean_download_target(text)
+        return target if _is_probably_url(target) else None
+
+    return None
+
+
+def _run_background_thread(func, *args, label: str, **kwargs):
+    # asyncio.create_task без ссылки/done-callback молча теряет исключения
+    # из фоновой задачи - здесь они хотя бы попадут в лог.
+    task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
+
+    def _consume_result(done_task: asyncio.Task):
+        try:
+            done_task.result()
+        except asyncio.CancelledError:
+            logger.debug("Фоновая задача отменена: %s", label)
+        except Exception:
+            logger.exception("Ошибка в фоновой задаче: %s", label)
+
+    task.add_done_callback(_consume_result)
+    return task
+
+
 def register_download_handlers(router: Router, sync_bot):
     ui_manager = get_ui_manager()
     video_info_cache = {}
 
-    async def process_url_message(message: Message):
-        from ..utils.url_validator import get_url_validator
+    async def process_url_message(message: Message, state: FSMContext):
         if message.from_user and message.from_user.is_bot: return
+        # Не перехватываем ссылку, если пользователь сейчас в другом FSM-сценарии
+        # (иначе тут раньше падал TypeError и бот молча переставал отвечать).
+        if await state.get_state(): return
         text = (message.text or message.caption or "").strip()
         if not text or text.startswith("/"): return
 
-        validator = get_url_validator()
-        extracted_url = next((getattr(e, "url", None) for e in [* (message.entities or []), *(message.caption_entities or [])] if getattr(e, "url", None)), None)
-        extracted_url = extracted_url or validator.extract_url(text)
-        is_valid, corrected_url, metadata = validator.validate(extracted_url or "")
+        url = _extract_download_target(text, message.entities, message.caption_entities)
         chat_id = message.chat.id
-
-        if not is_valid:
+        if not url:
             if message.chat.type == "private":
                 await message.reply(ui_manager.format_panel(i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"))
             return
-
-        url = corrected_url or extracted_url
 
         is_ig = "instagram.com/p/" in url.lower()
         from ..core.tiktok_photo_handler import is_tiktok_photo_url
         is_tt = is_tiktok_photo_url(url) or ('tiktok.com' in url.lower() and '/photo/' in url.lower())
 
+        if message.chat.type in {"group", "supergroup"} and not is_tt and not is_ig:
+            logger.info("Получена ссылка в группе %s: %s", chat_id, url)
+            _run_background_thread(_handle_group_download, url, chat_id, message.message_id, _download_manager, label=f"group_download:{chat_id}:{message.message_id}")
+            return
+
         if is_tt or is_ig:
             if is_tt and '/photo/' in url.lower(): url = re.sub(r'/photo/', '/video/', url, flags=re.IGNORECASE)
             s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_photo_title"), [i18n.get(chat_id, "status_photo_desc")], icon="🖼️"))
-            
+
             # Фоновый сбор оригинального текста для картинок перед стартом загрузки
             def _bg_photo_task():
                 from src.core.video_info import fetch_video_info
@@ -111,7 +270,7 @@ def register_download_handlers(router: Router, sync_bot):
                     try: sync_bot.edit_message_text(_build_download_limit_text(chat_id), chat_id, s_msg.message_id)
                     except Exception: pass
 
-            asyncio.create_task(asyncio.to_thread(_bg_photo_task))
+            _run_background_thread(_bg_photo_task, label=f"bg_photo:{chat_id}:{message.message_id}")
             return
 
         if any(x in url.lower() for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts']):
@@ -120,12 +279,8 @@ def register_download_handlers(router: Router, sync_bot):
             except ValueError: await s_msg.edit_text(_build_download_limit_text(chat_id))
             return
 
-        if message.chat.type in {"group", "supergroup"}:
-            asyncio.create_task(asyncio.to_thread(_handle_group_download, url, chat_id, message.message_id, download_manager=_download_manager))
-            return
-
-        s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fix_title" if metadata.get("fixed") else "status_search_title"), [i18n.get(chat_id, "status_fix_desc" if metadata.get("fixed") else "status_search_desc")], icon="✅ " if metadata.get("fixed") else "🔍"))
-        asyncio.create_task(asyncio.to_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, download_manager=_download_manager, build_download_limit_text=_build_download_limit_text, build_download_markup=get_markup_builder(chat_id)))
+        s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_search_title"), [i18n.get(chat_id, "status_search_desc")], icon="🔍"))
+        _run_background_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, label=f"video_info:{chat_id}:{message.message_id}", download_manager=_download_manager, build_download_limit_text=_build_download_limit_text, build_download_markup=get_markup_builder(chat_id))
 
     async def handle_download(call: CallbackQuery):
         parts = call.data.split("_")
@@ -156,7 +311,7 @@ def register_download_handlers(router: Router, sync_bot):
         try: await call.message.delete()
         except Exception: await call.message.edit_text(ui_manager.format_panel("Отменено", icon="✕"))
 
-    router.message.register(process_url_message, lambda m: bool((m.text or m.caption) and not (m.text or m.caption or "").strip().startswith("/")))
+    router.message.register(process_url_message, StateFilter(None), lambda m: bool((m.text or m.caption) and not (m.text or m.caption or "").strip().startswith("/")))
     router.callback_query.register(handle_download, lambda c: bool(c.data and c.data.startswith("dl_")))
     router.callback_query.register(handle_cancel_all, lambda c: c.data == "cancel_all_downloads")
     router.callback_query.register(handle_cancel, lambda c: bool(c.data and c.data.startswith("cancel_")))

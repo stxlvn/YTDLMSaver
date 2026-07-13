@@ -1,10 +1,15 @@
 import logging
+import multiprocessing
 import os
 import shutil
 import subprocess
 import json
 import tempfile
 import threading
+import time
+from dataclasses import dataclass
+from queue import Empty, Full
+
 import yt_dlp
 import config
 from ..utils.admin_notifier import notify_admins
@@ -12,7 +17,6 @@ from ..utils.file_utils import sanitize_filename
 from ..utils.i18n import i18n
 from .access import build_file_size_limit_error
 from .download_support import (
-    ProgressHook,
     describe_work_dir,
     ensure_task_work_dir,
     find_completed_files,
@@ -34,6 +38,7 @@ CACHE_FILE = "/root/ReSave/telegram_file_cache.json"
 # из того же треда - обычный Lock тут заклинил бы поток сам на себя.
 _cache_lock = threading.RLock()
 
+
 def _read_cache_locked():
     if os.path.exists(CACHE_FILE):
         try:
@@ -42,6 +47,7 @@ def _read_cache_locked():
         except Exception:
             return {}
     return {}
+
 
 def _write_cache_locked(cache_data):
     # Атомарная запись через temp-файл + os.replace: конкурентный читатель
@@ -56,9 +62,11 @@ def _write_cache_locked(cache_data):
             os.remove(tmp_path)
         raise
 
+
 def load_file_cache():
     with _cache_lock:
         return _read_cache_locked()
+
 
 def save_file_cache(cache_data):
     with _cache_lock:
@@ -66,6 +74,7 @@ def save_file_cache(cache_data):
             _write_cache_locked(cache_data)
         except Exception as e:
             logger.error(f"Ошибка сохранения кеша файлов: {e}")
+
 
 def update_file_cache_entry(cache_key, entry):
     # Держит lock на весь read-modify-write, иначе два параллельных
@@ -79,11 +88,13 @@ def update_file_cache_entry(cache_key, entry):
         except Exception as e:
             logger.error(f"Ошибка сохранения кеша файлов: {e}")
 
+
 def _ffmpeg_location() -> str | None:
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         return None
     return str(os.path.dirname(ffmpeg_path))
+
 
 def _get_format_size(url, action, format_param=None):
     try:
@@ -122,6 +133,7 @@ def _get_format_size(url, action, format_param=None):
     except Exception as e:
         logger.debug(f"Не удалось определить размер для {action}: {e}")
         return None
+
 
 def get_available_actions_optimized(url):
     max_size = 2 * 1024 * 1024 * 1024
@@ -177,12 +189,365 @@ def get_available_actions_optimized(url):
         logger.error(f"Size filter error: {e}")
         return default_actions, None
 
+
+# --- Изоляция скачивания yt-dlp в отдельном процессе (из origin/main) ---
+# Раньше yt-dlp.extract_info(download=True) выполнялся прямо в воркер-треде:
+# зависший процесс/сеть вешал воркер навсегда без таймаута. Здесь скачивание
+# идёт в дочернем процессе с жёстким дедлайном - зависший процесс просто убивается.
+
+@dataclass(frozen=True)
+class DownloadVariant:
+    label: str
+    format: str
+    postprocessors: tuple[dict, ...]
+    output_template: str
+
+
+def _queue_event(event_queue, event: tuple, *, block: bool = False):
+    try:
+        if block:
+            event_queue.put(event, timeout=5)
+        else:
+            event_queue.put_nowait(event)
+    except Full:
+        pass
+
+
+def _yt_dlp_download_worker(url: str, ydl_params: dict, event_queue):
+    def progress_hook(data):
+        status = data.get("status")
+        if status == "downloading":
+            total = data.get("total_bytes") or data.get("total_bytes_estimate")
+            downloaded = data.get("downloaded_bytes", 0)
+            if total:
+                _queue_event(event_queue, ("progress", downloaded, total))
+        elif status == "finished":
+            _queue_event(event_queue, ("progress", 1, 1))
+
+    try:
+        child_params = dict(ydl_params)
+        child_params["progress_hooks"] = [progress_hook]
+        with yt_dlp.YoutubeDL(child_params) as ydl:
+            ydl.download([url])
+    except BaseException as exc:
+        _queue_event(event_queue, ("error", type(exc).__name__, str(exc)), block=True)
+    else:
+        _queue_event(event_queue, ("ok", "", ""), block=True)
+
+
+def _stop_process(process: multiprocessing.Process):
+    if not process.is_alive():
+        return
+
+    process.terminate()
+    process.join(5)
+    if process.is_alive():
+        process.kill()
+        process.join(5)
+
+
+def _drain_download_events(event_queue, task) -> tuple | None:
+    result = None
+
+    while True:
+        try:
+            event = event_queue.get_nowait()
+        except Empty:
+            return result
+
+        event_type = event[0]
+        if event_type == "progress":
+            _, downloaded, total = event
+            if total:
+                task.progress = min(1.0, max(0.0, downloaded / total))
+        elif event_type in {"ok", "error"}:
+            result = event
+
+
+def _download_with_timeout(url: str, ydl_params: dict, timeout_seconds: int, task):
+    child_params = dict(ydl_params)
+    child_params.pop("progress_hooks", None)
+
+    task.progress = 0.0
+    event_queue = multiprocessing.Queue(maxsize=100)
+    process = multiprocessing.Process(
+        target=_yt_dlp_download_worker,
+        args=(url, child_params, event_queue),
+        daemon=True,
+    )
+    process.start()
+
+    deadline = time.monotonic() + timeout_seconds
+    result = None
+
+    while process.is_alive():
+        drained = _drain_download_events(event_queue, task)
+        if drained:
+            result = drained
+
+        if task.cancel_event.is_set():
+            _stop_process(process)
+            raise RuntimeError("Загрузка отменена пользователем")
+
+        if time.monotonic() >= deadline:
+            _stop_process(process)
+            raise TimeoutError(f"Download timed out after {timeout_seconds} seconds")
+
+        process.join(0.25)
+
+    drained = _drain_download_events(event_queue, task)
+    if drained:
+        result = drained
+
+    if result:
+        status, error_type, message = result
+        if status == "ok":
+            task.progress = 1.0
+            return
+        raise RuntimeError(f"{error_type}: {message}")
+
+    if process.exitcode:
+        if process.exitcode < 0:
+            signal_number = abs(process.exitcode)
+            raise RuntimeError(
+                "yt-dlp download process was killed by server "
+                f"(signal {signal_number}, exit code {process.exitcode})"
+            )
+        raise RuntimeError(f"yt-dlp exited with code {process.exitcode}")
+
+
+def _base_ydl_params(variant: "DownloadVariant") -> dict:
+    ydl_params = {
+        "format": variant.format,
+        "outtmpl": variant.output_template,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "merge_output_format": "mp4",
+        "http_chunk_size": 5 * 1024 * 1024,
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
+        "extractor_retries": 3,
+        "file_access_retries": 3,
+        "concurrent_fragment_downloads": 1,
+        "max_filesize": config.MAX_FILE_SIZE,
+        "continuedl": True,
+        "overwrites": True,
+        "trim_file_name": 180,
+        "cookiefile": config.COOKIES_FILE,
+        "nocheckcertificate": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
+        },
+        "extractor_args": {"youtube": ["player-client=mweb,default"]},
+    }
+
+    if variant.postprocessors:
+        ydl_params["postprocessors"] = list(variant.postprocessors)
+
+    if config.DOWNLOAD_RATE_LIMIT_BYTES > 0:
+        ydl_params["ratelimit"] = config.DOWNLOAD_RATE_LIMIT_BYTES
+
+    ffmpeg_location = _ffmpeg_location()
+    if ffmpeg_location:
+        ydl_params["ffmpeg_location"] = ffmpeg_location
+
+    return ydl_params
+
+
+def _clear_work_dir(work_dir):
+    for path in work_dir.iterdir():
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.debug("Не удалось очистить временный файл %s: %s", path, exc)
+
+
+def _can_try_next_variant(exc: Exception) -> bool:
+    error_text = str(exc).lower()
+    permanent_markers = (
+        "private",
+        "unsupported url",
+        "not a valid url",
+        "copyright",
+        "sign in to confirm",
+        "login required",
+        "video unavailable",
+        "this video is unavailable",
+        "403",
+        "404",
+    )
+    return not any(marker in error_text for marker in permanent_markers)
+
+
+def _format_download_failure(errors: list[str]) -> str:
+    if not errors:
+        return "Не удалось скачать видео"
+
+    last_error = errors[-1]
+    if any("killed by server" in error.lower() or "exit code -9" in error.lower() for error in errors):
+        return (
+            "Не удалось скачать видео: сервер убил процесс загрузки/склейки. "
+            "Я уже попробовал качество ниже, но загрузка всё равно не прошла. "
+            f"Последняя ошибка: {last_error}"
+        )
+
+    return f"Не удалось скачать видео. Последняя ошибка: {last_error}"
+
+
+def _download_first_available_variant(task, bot, work_dir, variants: list["DownloadVariant"]):
+    errors: list[str] = []
+
+    for index, variant in enumerate(variants, start=1):
+        if task.cancel_event.is_set():
+            raise RuntimeError("Загрузка отменена пользователем")
+
+        _clear_work_dir(work_dir)
+        if not task.silent_mode:
+            status_text = i18n.get(task.chat_id, "status_dl")
+            if index > 1:
+                status_text = f"⏬ Высокое качество не прошло, пробую {variant.label}..."
+            try:
+                bot.edit_message_text(status_text, task.chat_id, task.message_id)
+            except Exception:
+                pass
+
+        logger.info(
+            "Download format selected: task_id=%s action=%s format_param=%s variant=%s format=%s",
+            task.task_id,
+            task.action,
+            task.format_param,
+            variant.label,
+            variant.format,
+        )
+
+        try:
+            _download_with_timeout(
+                task.url,
+                _base_ydl_params(variant),
+                config.DOWNLOAD_TIMEOUT_SECONDS,
+                task,
+            )
+        except Exception as exc:
+            message = str(exc)
+            errors.append(f"{variant.label}: {message}")
+            logger.warning(
+                "Download variant failed: task_id=%s variant=%s error=%s",
+                task.task_id,
+                variant.label,
+                message,
+            )
+            if index == len(variants) or not _can_try_next_variant(exc):
+                raise RuntimeError(_format_download_failure(errors)) from exc
+            continue
+
+        downloaded_files = find_completed_files(work_dir)
+        if downloaded_files:
+            return max(downloaded_files, key=lambda path: path.stat().st_mtime)
+
+        contents = describe_work_dir(work_dir)
+        errors.append(f"{variant.label}: file not found after download ({contents})")
+        logger.error(
+            "Файл не найден после скачивания. task_id=%s, action=%s, work_dir=%s, contents=%s",
+            task.task_id,
+            task.action,
+            work_dir,
+            contents,
+        )
+
+    raise FileNotFoundError(_format_download_failure(errors) or "Файл не найден после скачивания")
+
+
+def _height_format(height: int, *, exact_first: bool = False) -> str:
+    if exact_first:
+        return (
+            f"best[height={height}][ext=mp4]/"
+            f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/"
+            f"bv*[height={height}]+ba/"
+            f"best[height<={height}][ext=mp4]/"
+            f"best[height<={height}]/"
+            f"bv*[height<={height}][ext=mp4]+ba[ext=m4a]/"
+            f"bv*[height<={height}]+ba/best"
+        )
+
+    return (
+        f"best[height<={height}][ext=mp4]/"
+        f"best[height<={height}]/"
+        f"bv*[height<={height}][ext=mp4]+ba[ext=m4a]/"
+        f"bv*[height<={height}]+ba/best"
+    )
+
+
+def _unique_heights(values: list[int]) -> list[int]:
+    seen = set()
+    result = []
+    for value in values:
+        if value > 0 and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _video_height_variants(output_path: str, heights: list[int], *, exact_first: bool = False):
+    capped_heights = [min(height, config.MAX_DOWNLOAD_HEIGHT) for height in heights]
+    return [
+        DownloadVariant(
+            label=f"{height}p",
+            format=_height_format(height, exact_first=exact_first and index == 0),
+            postprocessors=(),
+            output_template=f"{output_path}.%(ext)s",
+        )
+        for index, height in enumerate(_unique_heights(capped_heights))
+    ]
+
+
+def _get_download_variants(task, output_path) -> list["DownloadVariant"]:
+    if task.action == "best":
+        return _video_height_variants(output_path, [config.MAX_DOWNLOAD_HEIGHT, 720, 480, 360])
+
+    if task.action == "medium":
+        return _video_height_variants(output_path, [720, 480, 360])
+
+    if task.action == "low":
+        return _video_height_variants(output_path, [480, 360])
+
+    if task.action == "audio":
+        return [
+            DownloadVariant(
+                label="MP3",
+                format="bestaudio/best",
+                postprocessors=(
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    },
+                ),
+                output_template=f"{output_path}.mp3",
+            )
+        ]
+
+    if task.action == "gif":
+        return _video_height_variants(output_path, [480, 360])
+
+    if task.action == "res" and task.format_param:
+        height = min(int(task.format_param), config.MAX_DOWNLOAD_HEIGHT)
+        fallback_heights = [candidate for candidate in [1080, 720, 480, 360] if candidate < height]
+        return _video_height_variants(
+            output_path,
+            [height, *fallback_heights],
+            exact_first=True,
+        )
+
+    return _video_height_variants(output_path, [720, 480, 360])
+
+
 def handle_download_task(task, bot, temp_dir):
-    from ..utils.error_handler import get_error_handler
-    from ..utils.retry_manager import DOWNLOAD_RETRY_CONFIG, get_smart_retry_manager
-
-    error_handler = get_error_handler()
-
     try:
         if task.action == "subtitles":
             download_and_send_subtitles(task, bot, temp_dir)
@@ -197,28 +562,7 @@ def handle_download_task(task, bot, temp_dir):
             _download_and_send_instagram_photos(task, bot, temp_dir)
             return
 
-        retry_manager = get_smart_retry_manager(DOWNLOAD_RETRY_CONFIG)
-
-        def download_with_retry():
-            _download_and_send_video(task, bot, temp_dir)
-
-        def on_retry(attempt, delay):
-            if not task.silent_mode:
-                try:
-                    bot.edit_message_text(i18n.get(task.chat_id, "status_retry", attempt=attempt, delay=int(delay)), task.chat_id, task.message_id)
-                except Exception:
-                    pass
-
-        def on_failure(attempt, exception):
-            if not task.silent_mode and exception:
-                error_msg = error_handler.handle_error(exception)
-                try:
-                    bot.edit_message_text(error_msg.user_message, task.chat_id, task.message_id)
-                except Exception:
-                    pass
-            task.error = str(exception)
-
-        download_with_retry()
+        _download_and_send_video(task, bot, temp_dir)
     except Exception as exc:
         if not task.cancel_event.is_set():
             record_failed_download(task.chat_id)
@@ -374,8 +718,6 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
 
 def _download_and_send_video(task, bot, temp_dir):
     part2 = ''
-    url_lower = task.url.lower()
-    is_social_short = any(x in url_lower for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts'])
 
     cache_key = f"{task.url}_{task.action}_{task.format_param}"
     file_cache = load_file_cache()
@@ -404,11 +746,10 @@ def _download_and_send_video(task, bot, temp_dir):
                     kwargs = {'supports_streaming': True, 'caption': part1, 'parse_mode': 'HTML'}
                     if c_width: kwargs['width'] = c_width
                     if c_height: kwargs['height'] = c_height
-                    
-                    # Читаем duration из кеша или задачи
+
                     dur = c_duration or getattr(task, "info", {}).get("duration")
                     if dur: kwargs['duration'] = int(dur)
-                    
+
                     bot.send_video(task.chat_id, file_id, **kwargs)
                 elif media_type == "audio":
                     bot.send_audio(task.chat_id, file_id, caption=part1, parse_mode='HTML')
@@ -427,7 +768,11 @@ def _download_and_send_video(task, bot, temp_dir):
             except Exception as cache_err:
                 logger.warning(f"Кеш устарел или удален: {cache_err}. Качаем заново.")
 
+    url_lower = task.url.lower()
+    is_social_short = any(x in url_lower for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts'])
+
     thumbnail_path = None
+    work_dir = ensure_task_work_dir(task, temp_dir)
 
     if not is_social_short:
         try:
@@ -438,7 +783,6 @@ def _download_and_send_video(task, bot, temp_dir):
                 if thumbnail_url:
                     response = requests.get(thumbnail_url, timeout=10)
                     if response.status_code == 200:
-                        work_dir = ensure_task_work_dir(task, temp_dir)
                         raw_thumb = work_dir / "raw_thumb.jpg"
                         tg_thumb = work_dir / "tg_thumb.jpg"
                         with open(raw_thumb, 'wb') as f:
@@ -459,59 +803,17 @@ def _download_and_send_video(task, bot, temp_dir):
             logger.warning(f"Не удалось подготовить thumbnail: {e}")
 
     title = sanitize_filename(task.info.get("title") or task.info.get("id") or "video")
-    work_dir = ensure_task_work_dir(task, temp_dir)
     output_path = str(work_dir / "media")
 
-    fmt, post, output_template = _get_format_options(task, output_path)
-    if not task.silent_mode:
-        bot.edit_message_text(i18n.get(task.chat_id, "status_dl"), task.chat_id, task.message_id)
+    if task.action in {"audio", "gif"} and not shutil.which("ffmpeg"):
+        raise RuntimeError("FFmpeg is not installed on server")
 
-    ydl_params = {
-        "format": fmt,
-        "outtmpl": output_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "merge_output_format": "mp4",
-        "http_chunk_size": 10485760,
-        "nocheckcertificate": True,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
-        },
-        "progress_hooks": [ProgressHook(task, bot)],
-        "extractor_args": {
-            "youtube": ["player-client=mweb,default"]
-        },
-        "writethumbnail": not is_social_short,
-    }
-
-    postprocessors = list(post) if post else []
-    if task.action != "gif" and not is_social_short:
-        postprocessors.append({'key': 'EmbedThumbnail', 'already_have_thumbnail': False})
-    ydl_params["postprocessors"] = postprocessors
-
-    cookiefile_path = config.COOKIES_FILE
-    if os.path.exists(cookiefile_path):
-        ydl_params["cookiefile"] = cookiefile_path
-
-    ffmpeg_location = _ffmpeg_location()
-    if ffmpeg_location:
-        ydl_params["ffmpeg_location"] = ffmpeg_location
-
-    with yt_dlp.YoutubeDL(ydl_params) as ydl:
-        extracted = ydl.extract_info(task.url, download=True)
-        if extracted:
-            task.info.update(extracted)
+    variants = _get_download_variants(task, output_path)
+    file_path = _download_first_available_variant(task, bot, work_dir, variants)
 
     if task.info.get("title"):
         title = task.info.get("title")
 
-    downloaded_files = find_completed_files(work_dir)
-    if not downloaded_files:
-        raise FileNotFoundError("Файл не найден после скачивания")
-
-    file_path = max(downloaded_files, key=lambda path: path.stat().st_mtime)
     task.file_path = str(file_path)
     file_size_bytes = os.path.getsize(file_path)
     file_size_error = build_file_size_limit_error(task.chat_id, file_size_bytes)
@@ -522,23 +824,6 @@ def _download_and_send_video(task, bot, temp_dir):
         convert_to_gif_and_send(task, file_path, bot)
         return
 
-    video_width = None
-    video_height = None
-    if task.action != "audio":
-        try:
-            cmd = [
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height", "-of", "json", task.file_path
-            ]
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            probe_data = json.loads(proc.stdout)
-            if 'streams' in probe_data and len(probe_data['streams']) > 0:
-                video_width = int(probe_data['streams'][0].get('width', 0))
-                video_height = int(probe_data['streams'][0].get('height', 0))
-        except Exception as e:
-            logger.debug(f"Ошибка получения размеров (ffprobe): {e}")
-
-    # Обновление статуса загрузки с локализацией
     if not task.silent_mode:
         bot.edit_message_text(i18n.get(task.chat_id, "status_uploading"), task.chat_id, task.message_id)
 
@@ -546,17 +831,17 @@ def _download_and_send_video(task, bot, temp_dir):
     # все воркер-треды DownloadManager, и мутация его методов "на время вызова"
     # гонится с параллельными загрузками (одна задача может откатить патч
     # другой, либо получить чужой file_id в кеш). Вместо этого send_file_with_retry
-    # возвращает file_id/type напрямую.
-    captured_data = send_file_with_retry(task, file_path, title, bot, thumbnail_path, video_width, video_height) or {}
+    # возвращает file_id/type/width/height напрямую.
+    captured_data = send_file_with_retry(task, file_path, title, bot, thumbnail_path) or {}
     if captured_data.get('file_id'):
         update_file_cache_entry(cache_key, {
             "file_id": captured_data['file_id'],
             "type": captured_data['type'],
             "title": title,
             "description": task.info.get("description"),
-            "width": video_width,
-            "height": video_height,
-            "duration": task.info.get("duration") # Сохраняем duration в кеш
+            "width": captured_data.get('width'),
+            "height": captured_data.get('height'),
+            "duration": captured_data.get('duration') or task.info.get("duration"),
         })
 
     if part2:
@@ -568,29 +853,3 @@ def _download_and_send_video(task, bot, temp_dir):
             bot.delete_message(task.chat_id, task.message_id)
         except Exception:
             pass
-
-def _get_format_options(task, output_path):
-    url_lower = task.url.lower() if hasattr(task, 'url') else ""
-    is_social_short = any(x in url_lower for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts'])
-    SAFE_FALLBACK = "bestvideo+bestaudio/best"
-    if task.action == "best":
-        if is_social_short:
-            fmt = f"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/{SAFE_FALLBACK}"
-            return (fmt, [], f"{output_path}.%(ext)s")
-        return (SAFE_FALLBACK, [], f"{output_path}.%(ext)s")
-    if task.action == "medium":
-        fmt = f"bestvideo[height<=720]+bestaudio/best[height<=720]/{SAFE_FALLBACK}"
-        return (fmt, [], f"{output_path}.%(ext)s")
-    if task.action == "low":
-        fmt = f"bestvideo[height<=480]+bestaudio/best[height<=480]/{SAFE_FALLBACK}"
-        return (fmt, [], f"{output_path}.%(ext)s")
-    if task.action == "audio":
-        return ("bestaudio/best", [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}], f"{output_path}.mp3")
-    if task.action == "gif":
-        fmt = f"bestvideo[height<=480]+bestaudio/best[height<=480]/{SAFE_FALLBACK}"
-        return (fmt, [], f"{output_path}.%(ext)s")
-    if task.action == "res" and task.format_param:
-        height = int(task.format_param)
-        fmt = f"bestvideo[height={height}]+bestaudio/best[height={height}]/bestvideo[height<={height}]+bestaudio/best[height<={height}]/{SAFE_FALLBACK}"
-        return (fmt, [], f"{output_path}.%(ext)s")
-    return (SAFE_FALLBACK, [], f"{output_path}.%(ext)s")

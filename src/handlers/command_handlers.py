@@ -4,6 +4,7 @@ from datetime import datetime
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 from ..core.user_stats import get_stats_manager
 from ..utils.ui_manager import get_ui_manager
@@ -17,22 +18,26 @@ def register_command_handlers(router: Router):
     async def safe_reply(m: Message, text: str, **kwargs):
         try:
             return await m.reply(text, **kwargs)
-        except Exception:
+        except (TelegramBadRequest, TelegramForbiddenError) as exc:
+            logger.warning("Не удалось ответить на команду в чате %s: %s", m.chat.id, exc)
             return None
 
-    async def send_welcome(m: Message):
+    async def send_welcome(m: Message, state: FSMContext):
+        await state.clear()
         chat_id = m.chat.id
         text_lines = i18n.get(chat_id, "menu_welcome").split("\n")
         footer_text = i18n.get(chat_id, "menu_footer")
         await safe_reply(m, ui_manager.format_panel("ReSave", text_lines, icon="⚡", footer=footer_text))
 
-    async def help_command(m: Message):
+    async def help_command(m: Message, state: FSMContext):
+        await state.clear()
         chat_id = m.chat.id
         text_lines = i18n.get(chat_id, "menu_help").split("\n")
         faq_title = i18n.get(chat_id, "menu_faq")
         await safe_reply(m, ui_manager.format_panel(faq_title, text_lines, icon="📖"))
 
-    async def lang_command(m: Message):
+    async def lang_command(m: Message, state: FSMContext):
+        await state.clear()
         chat_id = m.chat.id
         buttons = []
         for lang_code, strings in i18n.locales.items():
@@ -51,7 +56,8 @@ def register_command_handlers(router: Router):
         await c.message.edit_text(i18n.get(chat_id, "lang_changed"))
         await c.answer()
 
-    async def status_command(m: Message):
+    async def status_command(m: Message, state: FSMContext):
+        await state.clear()
         from .download_handlers import get_download_manager
         manager = get_download_manager()
         chat_id = m.chat.id
@@ -78,7 +84,8 @@ def register_command_handlers(router: Router):
         kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads")]])
         await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)
 
-    async def cancel_download(m: Message):
+    async def cancel_download(m: Message, state: FSMContext):
+        await state.clear()
         from .download_handlers import get_download_manager
         manager = get_download_manager()
         chat_id = m.chat.id
@@ -91,7 +98,8 @@ def register_command_handlers(router: Router):
         cc = sum(1 for tid in user_tasks if manager.cancel_task(tid))
         await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅"))
 
-    async def stats_command(m: Message):
+    async def stats_command(m: Message, state: FSMContext):
+        await state.clear()
         chat_id = m.chat.id
         stats = get_stats_manager().get_user_stats(chat_id)
         lines = []
@@ -103,6 +111,22 @@ def register_command_handlers(router: Router):
                 (i18n.get(chat_id, "stats_videos"), str(stats.total_videos)),
                 (i18n.get(chat_id, "stats_size"), f"{stats.total_size_mb:.1f} MB")
             ]))
+            if stats.total_audios:
+                lines.append(f"• Аудио: {stats.total_audios}")
+            if stats.total_other_downloads:
+                lines.append(f"• Прочее: {stats.total_other_downloads}")
+            if stats.failed_downloads:
+                lines.append(f"• Ошибок загрузок: {stats.failed_downloads}")
+            if stats.first_download_date:
+                first_date = datetime.fromisoformat(stats.first_download_date)
+                lines.append(f"• Первая загрузка: {first_date.strftime('%d.%m.%Y %H:%M')}")
+            if stats.last_download_date:
+                last_date = datetime.fromisoformat(stats.last_download_date)
+                lines.append(f"• Последняя загрузка: {last_date.strftime('%d.%m.%Y %H:%M')}")
+            total_attempts = stats.downloads_count + stats.failed_downloads
+            if total_attempts > 0:
+                success_rate = (stats.downloads_count / total_attempts) * 100
+                lines.append(f"• Успешные загрузки: {success_rate:.1f}%")
         await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "menu_stats"), lines, icon="📊"))
 
     router.message.register(send_welcome, CommandStart())
