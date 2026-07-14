@@ -3,18 +3,7 @@
 <div align="center">
   <img src="logo.png" alt="YTDLMSaver logo" width="180" />
 
-  <h3>Telegram-бот для скачивания видео и медиаконтента</h3>
-
-  <p>
-    <a href="https://t.me/ReSafeBot"><b>Открыть бота: @ReSafeBot</b></a>
-  </p>
-
-  <p>
-    <img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white" alt="Python 3.9+" />
-    <img src="https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram&logoColor=white" alt="Telegram Bot" />
-    <img src="https://img.shields.io/badge/Powered%20by-yt--dlp-ff4e45" alt="yt-dlp" />
-  </p>
-</div>
+  <h3>Telegram-бот для скачивания медиаконтента</h3>
 
 ## Что умеет бот
 
