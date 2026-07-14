@@ -206,6 +206,8 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             url=task.url,
             action="audio" if task.action == "audio" else "video",
             file_size=file_size_mb,
+            chat_id=task.chat_id,
+            description=task.info.get("description"),
         )
 
         if task.action == "audio" and file_extension in audio_extensions:
