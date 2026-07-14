@@ -774,6 +774,15 @@ def _download_and_send_video(task, bot, temp_dir):
     thumbnail_path = None
     work_dir = ensure_task_work_dir(task, temp_dir)
 
+    logger.info(
+        f"Thumbnail: task_id={task.task_id} url={task.url} is_social_short={is_social_short}"
+    )
+
+    if is_social_short:
+        logger.info(
+            f"Thumbnail: task_id={task.task_id} пропущено - is_social_short=True (tiktok/reels/shorts), thumbnail не готовится"
+        )
+
     if not is_social_short:
         try:
             import requests
@@ -782,6 +791,9 @@ def _download_and_send_video(task, bot, temp_dir):
             # повторного bare-запроса без cookies, который для части видео
             # (например, возрастные ограничения) тихо не находит thumbnail.
             thumbnail_url = (task.info or {}).get('thumbnail')
+            logger.info(
+                f"Thumbnail: task_id={task.task_id} thumbnail из task.info={thumbnail_url!r}"
+            )
             if not thumbnail_url:
                 with yt_dlp.YoutubeDL({
                     'quiet': True,
@@ -790,14 +802,21 @@ def _download_and_send_video(task, bot, temp_dir):
                 }) as ydl:
                     info = ydl.extract_info(task.url, download=False)
                     thumbnail_url = info.get('thumbnail')
+                logger.info(
+                    f"Thumbnail: task_id={task.task_id} thumbnail из повторного yt-dlp запроса={thumbnail_url!r}"
+                )
 
             if not thumbnail_url:
-                logger.warning(f"Не удалось подготовить thumbnail: yt-dlp не вернул thumbnail для {task.url}")
+                logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить - yt-dlp не вернул thumbnail для {task.url}")
             else:
                 response = requests.get(thumbnail_url, timeout=10)
+                logger.info(
+                    f"Thumbnail: task_id={task.task_id} скачивание {thumbnail_url} -> HTTP {response.status_code}, "
+                    f"{len(response.content) if response.ok else 0} байт"
+                )
                 if response.status_code != 200:
                     logger.warning(
-                        f"Не удалось подготовить thumbnail: HTTP {response.status_code} при скачивании {thumbnail_url}"
+                        f"Thumbnail: task_id={task.task_id} не удалось подготовить - HTTP {response.status_code} при скачивании {thumbnail_url}"
                     )
                 else:
                     raw_thumb = work_dir / "raw_thumb.jpg"
@@ -812,12 +831,24 @@ def _download_and_send_video(task, bot, temp_dir):
                         ], check=True, capture_output=True)
                         thumbnail_path = str(tg_thumb)
                         task.thumbnail_path = thumbnail_path
+                        logger.info(
+                            f"Thumbnail: task_id={task.task_id} готово, resized -> {thumbnail_path} "
+                            f"({os.path.getsize(thumbnail_path)} байт)"
+                        )
                     except Exception as resize_e:
-                        logger.warning(f"Ошибка ресайза обложки: {resize_e}")
+                        logger.warning(f"Thumbnail: task_id={task.task_id} ошибка ресайза обложки: {resize_e}")
                         thumbnail_path = str(raw_thumb)
                         task.thumbnail_path = thumbnail_path
+                        logger.info(
+                            f"Thumbnail: task_id={task.task_id} готово (без ресайза, raw) -> {thumbnail_path} "
+                            f"({os.path.getsize(thumbnail_path)} байт)"
+                        )
         except Exception as e:
-            logger.warning(f"Не удалось подготовить thumbnail: {e}")
+            logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить: {e}", exc_info=True)
+
+    logger.info(
+        f"Thumbnail: task_id={task.task_id} итог: thumbnail_path={thumbnail_path!r}"
+    )
 
     title = sanitize_filename(task.info.get("title") or task.info.get("id") or "video")
     output_path = str(work_dir / "media")

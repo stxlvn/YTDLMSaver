@@ -257,6 +257,16 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             video_kwargs["height"] = video_metadata["height"]
         if thumbnail_path and os.path.exists(thumbnail_path):
             video_kwargs["thumbnail"] = thumbnail_path
+            logger.info(
+                "Thumbnail: task_id=%s передаю в send_video path=%s (%d байт)",
+                task.task_id, thumbnail_path, os.path.getsize(thumbnail_path),
+            )
+        else:
+            logger.info(
+                "Thumbnail: task_id=%s send_video БЕЗ thumbnail (thumbnail_path=%r, exists=%s)",
+                task.task_id, thumbnail_path,
+                os.path.exists(thumbnail_path) if thumbnail_path else None,
+            )
 
         try:
             res = bot.send_video(
