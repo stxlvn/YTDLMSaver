@@ -4,8 +4,9 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+import aiofiles
 import config
 from aiogram import Bot
 from aiogram.types import (
@@ -13,9 +14,41 @@ from aiogram.types import (
     FSInputFile,
     ReplyParameters,
 )
+from aiogram.types.input_file import DEFAULT_CHUNK_SIZE
 
 
 logger = logging.getLogger(__name__)
+
+
+class ProgressTrackingFSInputFile(FSInputFile):
+    """FSInputFile that reports (bytes_sent, total_bytes) after every chunk.
+
+    aiogram streams the file straight from disk as it builds the multipart
+    upload body, so this is the only point where real upload progress is
+    observable - there is no separate "upload" step to hook into afterwards.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        on_progress: Callable[[int, int], None],
+        filename: str | None = None,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ):
+        super().__init__(path, filename=filename, chunk_size=chunk_size)
+        self._on_progress = on_progress
+        self._total_bytes = os.path.getsize(path)
+
+    async def read(self, bot: Bot):
+        sent = 0
+        async with aiofiles.open(self.path, "rb") as f:
+            while chunk := await f.read(self.chunk_size):
+                sent += len(chunk)
+                try:
+                    self._on_progress(sent, self._total_bytes)
+                except Exception:
+                    pass
+                yield chunk
 
 
 class AiogramSyncBotAdapter:
@@ -72,13 +105,23 @@ class AiogramSyncBotAdapter:
         )
         return any(marker in error_text for marker in transport_markers)
 
-    def _prepare_file(self, file_obj: Any, *, filename: str | None = None):
+    def _prepare_file(
+        self,
+        file_obj: Any,
+        *,
+        filename: str | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+    ):
         if isinstance(file_obj, (FSInputFile, BufferedInputFile)):
             return file_obj
 
         if isinstance(file_obj, (str, os.PathLike)):
             path = str(file_obj)
             if os.path.exists(path):
+                if on_progress is not None:
+                    return ProgressTrackingFSInputFile(
+                        path, on_progress, filename=filename or Path(path).name
+                    )
                 return FSInputFile(path, filename=filename or Path(path).name)
             return path
 
@@ -167,9 +210,9 @@ class AiogramSyncBotAdapter:
         photo_input = self._prepare_file(photo)
         return self._call(self.bot.send_photo(chat_id=chat_id, photo=photo_input, **payload))
 
-    def send_video(self, chat_id, video, **kwargs):
+    def send_video(self, chat_id, video, on_progress=None, **kwargs):
         payload = self._normalize_kwargs(kwargs)
-        video_input = self._prepare_file(video)
+        video_input = self._prepare_file(video, on_progress=on_progress)
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_video(
                 chat_id=chat_id,
@@ -178,17 +221,19 @@ class AiogramSyncBotAdapter:
             ),
             cloud_coro_factory=lambda: self.cloud_upload_bot.send_video(
                 chat_id=chat_id,
-                video=self._prepare_file(video),
+                video=self._prepare_file(video, on_progress=on_progress),
                 **payload,
             ),
             file_obj=video,
             method_name="sendVideo",
         )
 
-    def send_document(self, chat_id, document, **kwargs):
+    def send_document(self, chat_id, document, on_progress=None, **kwargs):
         payload = self._normalize_kwargs(kwargs)
         visible_file_name = payload.pop("_visible_file_name", None)
-        document_input = self._prepare_file(document, filename=visible_file_name)
+        document_input = self._prepare_file(
+            document, filename=visible_file_name, on_progress=on_progress
+        )
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_document(
                 chat_id=chat_id,
@@ -197,16 +242,18 @@ class AiogramSyncBotAdapter:
             ),
             cloud_coro_factory=lambda: self.cloud_upload_bot.send_document(
                 chat_id=chat_id,
-                document=self._prepare_file(document, filename=visible_file_name),
+                document=self._prepare_file(
+                    document, filename=visible_file_name, on_progress=on_progress
+                ),
                 **payload,
             ),
             file_obj=document,
             method_name="sendDocument",
         )
 
-    def send_audio(self, chat_id, audio, **kwargs):
+    def send_audio(self, chat_id, audio, on_progress=None, **kwargs):
         payload = self._normalize_kwargs(kwargs)
-        audio_input = self._prepare_file(audio)
+        audio_input = self._prepare_file(audio, on_progress=on_progress)
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_audio(
                 chat_id=chat_id,
@@ -215,7 +262,7 @@ class AiogramSyncBotAdapter:
             ),
             cloud_coro_factory=lambda: self.cloud_upload_bot.send_audio(
                 chat_id=chat_id,
-                audio=self._prepare_file(audio),
+                audio=self._prepare_file(audio, on_progress=on_progress),
                 **payload,
             ),
             file_obj=audio,

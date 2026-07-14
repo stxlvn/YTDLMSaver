@@ -5,6 +5,7 @@ import threading
 import time
 
 import config
+from .download_support import format_file_size
 from .models import DownloadTask
 from ..utils.ui_manager import get_ui_manager
 
@@ -124,6 +125,7 @@ class DownloadManager:
 
                 task.status = "downloading"
                 task.started_at = time.time()
+                task.stage_started_at = task.started_at
                 self._download_and_send_task(task)
 
                 if not task.cancel_event.is_set():
@@ -163,9 +165,11 @@ class DownloadManager:
                         if task.progress > 0 and task.progress < 1.0:
                             ui_manager = get_ui_manager()
                             progress_bar = ui_manager.create_progress_bar(task.progress)
+                            is_upload = task.stage == "upload"
+                            stage_started_at = task.stage_started_at or task.started_at
 
-                            if task.started_at and task.progress > 0.05:
-                                elapsed = time.time() - task.started_at
+                            if stage_started_at and task.progress > 0.05:
+                                elapsed = time.time() - stage_started_at
                                 total_estimated = elapsed / task.progress
                                 remaining = total_estimated - elapsed
                                 if remaining > 0:
@@ -175,15 +179,34 @@ class DownloadManager:
                             else:
                                 remaining_str = ""
 
+                            speed = task.speed_bytes_per_sec
+                            speed_line = (
+                                f"🚀 {format_file_size(speed)}/s"
+                                if speed and speed > 0
+                                else ""
+                            )
+
+                            title = (
+                                i18n.get(task.chat_id, "status_uploading_title")
+                                if is_upload
+                                else i18n.get(task.chat_id, "status_downloading")
+                            )
+                            stage_icon = "⬆️" if is_upload else "⬇️"
+
+                            lines = [f"{stage_icon} {progress_bar}"]
+                            if speed_line:
+                                lines.append(speed_line)
+                            lines.append(
+                                f"⏱️ {remaining_str}" if remaining_str else f"⏱️ {i18n.get(task.chat_id, 'status_time_calculating')}"
+                            )
+                            if not is_upload:
+                                lines.append("")
+                                lines.append(i18n.get(task.chat_id, "status_send_after_process"))
+
                             self.bot.edit_message_text(
                                 ui_manager.format_panel(
-                                    i18n.get(task.chat_id, "status_downloading"),
-                                    [
-                                        f"⬇️ {progress_bar}",
-                                        f"⏱️ {remaining_str}" if remaining_str else f"⏱️ {i18n.get(task.chat_id, 'status_time_calculating')}",
-                                        "",
-                                        i18n.get(task.chat_id, "status_send_after_process"),
-                                    ],
+                                    title,
+                                    lines,
                                     icon="📦",
                                 ),
                                 task.chat_id,

@@ -14,9 +14,12 @@ class DownloadTask:
     format_param: Optional[str] = None
     status: str = "pending"
     progress: float = 0.0
+    speed_bytes_per_sec: float = 0.0
+    stage: str = "download"
     file_path: Optional[str] = None
     file_id: Optional[str] = None
     started_at: Optional[float] = None
+    stage_started_at: Optional[float] = None
     completed_at: Optional[float] = None
     error: Optional[str] = None
     work_dir: Optional[str] = None

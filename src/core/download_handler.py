@@ -3,11 +3,13 @@ import multiprocessing
 import os
 import shutil
 import subprocess
+import sys
 import json
 import tempfile
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Empty, Full
 
 import yt_dlp
@@ -32,7 +34,7 @@ from .media_assets import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_FILE = "/root/ReSave/telegram_file_cache.json"
+CACHE_FILE = str(Path(__file__).resolve().parents[2] / "telegram_file_cache.json")
 # RLock (не Lock): update_file_cache_entry держит блокировку на весь
 # read-modify-write, и при этом дергает _read_cache_locked/_write_cache_locked
 # из того же треда - обычный Lock тут заклинил бы поток сам на себя.
@@ -214,15 +216,39 @@ def _queue_event(event_queue, event: tuple, *, block: bool = False):
 
 
 def _yt_dlp_download_worker(url: str, ydl_params: dict, event_queue):
+    # bestvideo+bestaudio скачивается как ДВА отдельных файла в рамках одного
+    # ydl.download(): видео-поток 0->100%, затем аудио-поток заново с 0->100%.
+    # Раньше прогресс брался только с текущего файла, поэтому бар откатывался
+    # к нулю на середине и выглядело, будто скачивает то же самое видео дважды.
+    # Здесь суммируем downloaded/total по всем виденным файлам, чтобы бар
+    # был монотонным и отражал прогресс по всей задаче целиком.
+    file_totals: dict[str, int] = {}
+    file_downloaded: dict[str, int] = {}
+
+    def _emit_combined(speed):
+        overall_total = sum(file_totals.values())
+        if not overall_total:
+            return
+        overall_downloaded = sum(file_downloaded.values())
+        _queue_event(event_queue, ("progress", overall_downloaded, overall_total, speed))
+
     def progress_hook(data):
         status = data.get("status")
+        filename = data.get("filename") or data.get("tmpfilename") or "unknown"
         if status == "downloading":
             total = data.get("total_bytes") or data.get("total_bytes_estimate")
             downloaded = data.get("downloaded_bytes", 0)
+            speed = data.get("speed") or 0
             if total:
-                _queue_event(event_queue, ("progress", downloaded, total))
+                file_totals[filename] = total
+                file_downloaded[filename] = downloaded
+                _emit_combined(speed)
         elif status == "finished":
-            _queue_event(event_queue, ("progress", 1, 1))
+            total = data.get("total_bytes") or file_totals.get(filename)
+            if total:
+                file_totals[filename] = total
+                file_downloaded[filename] = total
+                _emit_combined(0)
 
     try:
         child_params = dict(ydl_params)
@@ -257,9 +283,10 @@ def _drain_download_events(event_queue, task) -> tuple | None:
 
         event_type = event[0]
         if event_type == "progress":
-            _, downloaded, total = event
+            _, downloaded, total, speed = event
             if total:
                 task.progress = min(1.0, max(0.0, downloaded / total))
+            task.speed_bytes_per_sec = speed or 0
         elif event_type in {"ok", "error"}:
             result = event
 
@@ -269,6 +296,9 @@ def _download_with_timeout(url: str, ydl_params: dict, timeout_seconds: int, tas
     child_params.pop("progress_hooks", None)
 
     task.progress = 0.0
+    task.speed_bytes_per_sec = 0.0
+    task.stage = "download"
+    task.stage_started_at = time.time()
     event_queue = multiprocessing.Queue(maxsize=100)
     process = multiprocessing.Process(
         target=_yt_dlp_download_worker,
@@ -573,7 +603,7 @@ def handle_download_task(task, bot, temp_dir):
                 notify_admins(
                     bot,
                     (
-                        "⚠️ [ReSave] FFmpeg issue detected\n"
+                        "⚠️ [YTDLMSaver] FFmpeg issue detected\n"
                         f"Chat ID: {task.chat_id}\n"
                         f"Action: {task.action}\n"
                         f"URL: {task.url}\n"
@@ -625,8 +655,9 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
     cookie_file = config.COOKIES_FILE
 
     def run_gdl(use_cookies):
+        gallery_dl_bin = str(Path(sys.executable).with_name("gallery-dl"))
         cmd = [
-            "/root/ReSave/venv/bin/gallery-dl",
+            gallery_dl_bin,
             "--directory", str(work_dir)
         ]
         if use_cookies and os.path.exists(cookie_file):

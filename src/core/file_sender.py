@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import config
@@ -13,6 +14,32 @@ from ..utils.message_templates import MessageTemplate
 from .download_support import record_download_success
 
 logger = logging.getLogger(__name__)
+
+
+def _make_upload_progress_callback(task):
+    # Вызывается из read() ProgressTrackingFSInputFile на event-loop треде
+    # бота, а не в этом воркер-треде - как и task.progress при скачивании,
+    # пишем в обычные атрибуты task без лока (тот же паттерн, что уже
+    # используется для download-прогресса).
+    state = {"last_sent": 0, "last_time": time.monotonic(), "started": False}
+
+    def _on_progress(sent, total):
+        if not state["started"]:
+            state["started"] = True
+            task.stage_started_at = time.time()
+        task.stage = "upload"
+        if total:
+            task.progress = min(1.0, max(0.0, sent / total))
+
+        now = time.monotonic()
+        elapsed = now - state["last_time"]
+        if elapsed >= 0.5:
+            delta = sent - state["last_sent"]
+            task.speed_bytes_per_sec = delta / elapsed if elapsed > 0 else 0.0
+            state["last_sent"] = sent
+            state["last_time"] = now
+
+    return _on_progress
 
 
 def _parse_ratio(value: str | None) -> float | None:
@@ -192,6 +219,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             timeout=600,
             reply_to_message_id=task.reply_to_id,
             visible_file_name=visible_file_name,
+            on_progress=_make_upload_progress_callback(task),
         )
         file_id = _extract_file_id(res, "document")
         if file_id:
@@ -226,6 +254,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
                     performer=task.info.get("uploader", "Unknown"),
                     timeout=300,
                     reply_to_message_id=task.reply_to_id,
+                    on_progress=_make_upload_progress_callback(task),
                     **audio_kwargs,
                 )
                 file_id = _extract_file_id(res, "audio")
@@ -282,6 +311,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
                 supports_streaming=True,
                 timeout=600,
                 reply_to_message_id=task.reply_to_id,
+                on_progress=_make_upload_progress_callback(task),
                 **video_kwargs,
             )
             file_id = _extract_file_id(res, "video")
