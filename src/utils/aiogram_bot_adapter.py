@@ -116,8 +116,7 @@ class AiogramSyncBotAdapter:
             )
             return self._call(cloud_coro_factory())
 
-    @staticmethod
-    def _normalize_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(kwargs)
 
         timeout = normalized.pop("timeout", None)
@@ -132,6 +131,14 @@ class AiogramSyncBotAdapter:
 
         if visible_file_name is not None:
             normalized["_visible_file_name"] = visible_file_name
+
+        # aiogram/pydantic требует InputFile для thumbnail (не голый путь строкой) -
+        # send_video/send_document передают его как обычный str, что раньше валило
+        # запрос с ValidationError и либо роняло отправку, либо (если thumbnail
+        # был None) молча уходило без превью.
+        thumbnail = normalized.get("thumbnail")
+        if thumbnail is not None:
+            normalized["thumbnail"] = self._prepare_file(thumbnail)
 
         return normalized
 
