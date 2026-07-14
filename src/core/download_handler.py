@@ -777,28 +777,45 @@ def _download_and_send_video(task, bot, temp_dir):
     if not is_social_short:
         try:
             import requests
-            with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
-                info = ydl.extract_info(task.url, download=False)
-                thumbnail_url = info.get('thumbnail')
-                if thumbnail_url:
-                    response = requests.get(thumbnail_url, timeout=10)
-                    if response.status_code == 200:
-                        raw_thumb = work_dir / "raw_thumb.jpg"
-                        tg_thumb = work_dir / "tg_thumb.jpg"
-                        with open(raw_thumb, 'wb') as f:
-                            f.write(response.content)
-                        try:
-                            subprocess.run([
-                                'ffmpeg', '-y', '-i', str(raw_thumb),
-                                '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
-                                '-q:v', '5', str(tg_thumb)
-                            ], check=True, capture_output=True)
-                            thumbnail_path = str(tg_thumb)
-                            task.thumbnail_path = thumbnail_path
-                        except Exception as resize_e:
-                            logger.warning(f"Ошибка ресайза обложки: {resize_e}")
-                            thumbnail_path = str(raw_thumb)
-                            task.thumbnail_path = thumbnail_path
+            # task.info уже получен раньше (в handlers/download_processing.py)
+            # через yt-dlp с cookiefile - используем его thumbnail вместо
+            # повторного bare-запроса без cookies, который для части видео
+            # (например, возрастные ограничения) тихо не находит thumbnail.
+            thumbnail_url = (task.info or {}).get('thumbnail')
+            if not thumbnail_url:
+                with yt_dlp.YoutubeDL({
+                    'quiet': True,
+                    'no_warnings': True,
+                    'cookiefile': config.COOKIES_FILE,
+                }) as ydl:
+                    info = ydl.extract_info(task.url, download=False)
+                    thumbnail_url = info.get('thumbnail')
+
+            if not thumbnail_url:
+                logger.warning(f"Не удалось подготовить thumbnail: yt-dlp не вернул thumbnail для {task.url}")
+            else:
+                response = requests.get(thumbnail_url, timeout=10)
+                if response.status_code != 200:
+                    logger.warning(
+                        f"Не удалось подготовить thumbnail: HTTP {response.status_code} при скачивании {thumbnail_url}"
+                    )
+                else:
+                    raw_thumb = work_dir / "raw_thumb.jpg"
+                    tg_thumb = work_dir / "tg_thumb.jpg"
+                    with open(raw_thumb, 'wb') as f:
+                        f.write(response.content)
+                    try:
+                        subprocess.run([
+                            'ffmpeg', '-y', '-i', str(raw_thumb),
+                            '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
+                            '-q:v', '5', str(tg_thumb)
+                        ], check=True, capture_output=True)
+                        thumbnail_path = str(tg_thumb)
+                        task.thumbnail_path = thumbnail_path
+                    except Exception as resize_e:
+                        logger.warning(f"Ошибка ресайза обложки: {resize_e}")
+                        thumbnail_path = str(raw_thumb)
+                        task.thumbnail_path = thumbnail_path
         except Exception as e:
             logger.warning(f"Не удалось подготовить thumbnail: {e}")
 

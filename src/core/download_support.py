@@ -3,6 +3,7 @@ import time
 import re
 from pathlib import Path
 from ..utils.i18n import i18n
+from .user_stats import get_stats_manager
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,17 @@ def format_file_size(size_bytes):
         size_bytes /= 1024.0
     return f"{size_bytes:.2f} PB"
 
-def record_download_success(chat_id): pass
-def record_failed_download(chat_id): pass
+def record_download_success(chat_id, action=None, file_size_mb=None):
+    try:
+        get_stats_manager().record_download(chat_id, action=action, file_size_mb=file_size_mb)
+    except Exception as exc:
+        logger.error("Ошибка при записи статистики загрузки: %s", exc)
+
+def record_failed_download(chat_id):
+    try:
+        get_stats_manager().record_failed_download(chat_id)
+    except Exception as exc:
+        logger.error("Ошибка при записи неуспешной загрузки: %s", exc)
 def describe_work_dir(task): return f"/root/ReSave/temp/{task.chat_id}_{task.message_id}"
 def ensure_task_work_dir(task, temp_dir):
     work_dir = Path(temp_dir) / f"{task.chat_id}_{task.message_id}"
