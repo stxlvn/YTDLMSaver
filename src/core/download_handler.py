@@ -224,12 +224,24 @@ def _yt_dlp_download_worker(url: str, ydl_params: dict, event_queue):
     # был монотонным и отражал прогресс по всей задаче целиком.
     file_totals: dict[str, int] = {}
     file_downloaded: dict[str, int] = {}
+    # Пока не увидим hook для второго (аудио) файла, его размер неизвестен,
+    # так что после завершения видео комбинированный total временно равен
+    # только размеру видео - и ratio на миг показывает 100%. Как только аудио
+    # начинает скачиваться, total увеличивается, и ratio просел бы обратно
+    # (например 100% -> 92%). max_ratio_seen не даёт прогрессу идти назад.
+    max_ratio_seen = 0.0
 
     def _emit_combined(speed):
+        nonlocal max_ratio_seen
         overall_total = sum(file_totals.values())
         if not overall_total:
             return
         overall_downloaded = sum(file_downloaded.values())
+        ratio = overall_downloaded / overall_total
+        if ratio < max_ratio_seen:
+            overall_downloaded = max_ratio_seen * overall_total
+        else:
+            max_ratio_seen = ratio
         _queue_event(event_queue, ("progress", overall_downloaded, overall_total, speed))
 
     def progress_hook(data):
