@@ -902,6 +902,8 @@ def _download_and_send_video(task, bot, temp_dir):
     # другой, либо получить чужой file_id в кеш). Вместо этого send_file_with_retry
     # возвращает file_id/type/width/height напрямую.
     captured_data = send_file_with_retry(task, file_path, title, bot, thumbnail_path) or {}
+    if captured_data.get('part2'):
+        part2 = captured_data['part2']
     if captured_data.get('file_id'):
         update_file_cache_entry(cache_key, {
             "file_id": captured_data['file_id'],
