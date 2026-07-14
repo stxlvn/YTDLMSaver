@@ -23,6 +23,8 @@ database.db
 *.sqlite3
 user_stats.json
 po_token.txt
+telegram_file_cache.json
+user_langs.json
 
 test_config.py
 venv/
