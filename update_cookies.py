@@ -2,10 +2,13 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
+
 from playwright.async_api import async_playwright
 
-COOKIE_FILE = "/root/ReSave/cookies.txt"
-STATE_FILE = "/root/ReSave/state.json"
+_PROJECT_ROOT = Path(__file__).resolve().parent
+COOKIE_FILE = str(_PROJECT_ROOT / "cookies.txt")
+STATE_FILE = str(_PROJECT_ROOT / "state.json")
 
 async def main():
     async with async_playwright() as p:

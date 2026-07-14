@@ -1,8 +1,11 @@
 import json
 import re
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent
 
 # 1. Добавляем названия языков прямо в словари
-LOCALES_FILE = "/root/ReSave/locales.json"
+LOCALES_FILE = str(_PROJECT_ROOT / "locales.json")
 with open(LOCALES_FILE, 'r', encoding='utf-8') as f:
     locales = json.load(f)
 
@@ -13,7 +16,7 @@ with open(LOCALES_FILE, 'w', encoding='utf-8') as f:
     json.dump(locales, f, ensure_ascii=False, indent=4)
 
 # 2. Переписываем обработчик команды /lang
-ch_path = "/root/ReSave/src/handlers/command_handlers.py"
+ch_path = str(_PROJECT_ROOT / "src" / "handlers" / "command_handlers.py")
 with open(ch_path, 'r', encoding='utf-8') as f:
     content = f.read()
 

@@ -30,7 +30,11 @@ def record_failed_download(chat_id):
         get_stats_manager().record_failed_download(chat_id)
     except Exception as exc:
         logger.error("Ошибка при записи неуспешной загрузки: %s", exc)
-def describe_work_dir(task): return f"/root/ReSave/temp/{task.chat_id}_{task.message_id}"
+def describe_work_dir(work_dir):
+    if not work_dir.exists():
+        return "<missing>"
+    items = sorted(path.name for path in work_dir.iterdir())
+    return ", ".join(items) if items else "<empty>"
 def ensure_task_work_dir(task, temp_dir):
     work_dir = Path(temp_dir) / f"{task.chat_id}_{task.message_id}"
     work_dir.mkdir(parents=True, exist_ok=True)

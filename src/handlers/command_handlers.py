@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
+from ..core.download_support import format_file_size
 from ..core.user_stats import get_stats_manager
 from ..utils.ui_manager import get_ui_manager
 from ..utils.i18n import i18n
@@ -27,7 +28,7 @@ def register_command_handlers(router: Router):
         chat_id = m.chat.id
         text_lines = i18n.get(chat_id, "menu_welcome").split("\n")
         footer_text = i18n.get(chat_id, "menu_footer")
-        await safe_reply(m, ui_manager.format_panel("ReSave", text_lines, icon="⚡", footer=footer_text))
+        await safe_reply(m, ui_manager.format_panel("YTDLMSaver", text_lines, icon="⚡", footer=footer_text))
 
     async def help_command(m: Message, state: FSMContext):
         await state.clear()
@@ -71,9 +72,13 @@ def register_command_handlers(router: Router):
         for t in user_tasks.values():
             lines.append(f"🎬 {t.info.get('title', 'Video')}")
             if t.status == "downloading":
-                lines.append(f"⬇️ {ui_manager.create_progress_bar(t.progress)}")
-                if t.started_at and t.progress > 0.05:
-                    elapsed = time.time() - t.started_at
+                is_upload = t.stage == "upload"
+                stage_started_at = t.stage_started_at or t.started_at
+                lines.append(f"{'⬆️' if is_upload else '⬇️'} {ui_manager.create_progress_bar(t.progress)}")
+                if t.speed_bytes_per_sec and t.speed_bytes_per_sec > 0:
+                    lines.append(f"🚀 {format_file_size(t.speed_bytes_per_sec)}/s")
+                if stage_started_at and t.progress > 0.05:
+                    elapsed = time.time() - stage_started_at
                     remaining = (elapsed / t.progress) - elapsed
                     lines.append(f"⏱️ {i18n.get(chat_id, 'status_time_left', time=manager._format_time(remaining, chat_id)) if remaining > 0 else i18n.get(chat_id, 'status_finishing')}")
                 else:

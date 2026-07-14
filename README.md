@@ -1,7 +1,7 @@
-# ReSave
+# YTDLMSaver
 
 <div align="center">
-  <img src="logo.png" alt="ReSave logo" width="180" />
+  <img src="logo.png" alt="YTDLMSaver logo" width="180" />
 
   <h3>Telegram-бот для скачивания видео и медиаконтента</h3>
 
@@ -91,7 +91,7 @@ SEND_AS_DOC_LIMIT=52428800
 Команда для вкладки Service на alwaysdata:
 
 ```bash
-bash -c 'export PATH=$HOME/.local/bin:$HOME/ffmpeg/ffmpeg-7.0.2-amd64-static:$PATH && cd /home/renothing/ReSave && python main.py'
+bash -c 'export PATH=$HOME/.local/bin:$HOME/ffmpeg/ffmpeg-7.0.2-amd64-static:$PATH && cd /home/renothing/YTDLMSaver && python main.py'
 ```
 
 В таком режиме бот работает через облачный Telegram Bot API. Это полностью
@@ -145,7 +145,7 @@ MAX_DOWNLOADS_PER_USER=1
 Команда для вкладки Service:
 
 ```bash
-bash /home/renothing/ReSave/scripts/run_alwaysdata_local_bot_api.sh
+bash /home/renothing/YTDLMSaver/scripts/run_alwaysdata_local_bot_api.sh
 ```
 
 По умолчанию скрипт ожидает бинарник здесь:
@@ -157,7 +157,7 @@ bash /home/renothing/ReSave/scripts/run_alwaysdata_local_bot_api.sh
 Если путь другой, задайте его перед запуском:
 
 ```bash
-bash -c 'export BOT_API_BIN=$HOME/telegram-bot-api/bin/telegram-bot-api && bash /home/renothing/ReSave/scripts/run_alwaysdata_local_bot_api.sh'
+bash -c 'export BOT_API_BIN=$HOME/telegram-bot-api/bin/telegram-bot-api && bash /home/renothing/YTDLMSaver/scripts/run_alwaysdata_local_bot_api.sh'
 ```
 
 Скрипт поднимает Bot API на `127.0.0.1:8081`, поэтому он доступен только боту внутри этого же Service-процесса. Это безопаснее, чем открывать порт сервиса наружу.
@@ -212,16 +212,16 @@ python -m unittest discover -s tests -v
 ## Запуск как systemd-сервис (Linux)
 
 ```bash
-sudo systemctl start resave
-sudo systemctl status resave
+sudo systemctl start ytdlmsaver
+sudo systemctl status ytdlmsaver
 ```
 
 Полезные команды:
 
 ```bash
-sudo systemctl restart resave
-journalctl -u resave -f
-sudo systemctl enable resave
+sudo systemctl restart ytdlmsaver
+journalctl -u ytdlmsaver -f
+sudo systemctl enable ytdlmsaver
 ```
 
 ## Примечания

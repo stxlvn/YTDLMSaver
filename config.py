@@ -96,7 +96,7 @@ class Settings:
 
 def build_settings() -> Settings:
     temp_dir = _resolve_path(_get_str("TEMP_DIR", "temp_downloads"))
-    cookies_file = _resolve_path(_get_str("COOKIES_FILE", "/root/ReSave/cookies.txt"))
+    cookies_file = _resolve_path(_get_str("COOKIES_FILE", str(BASE_DIR / "cookies.txt")))
     stats_db_path = _resolve_path(_get_str("STATS_DB_PATH", _get_str("DB_NAME", "database.db")))
     bot_api_base_url = _get_str("BOT_API_BASE_URL")
     bot_api_is_local = _get_bool("BOT_API_IS_LOCAL", bool(bot_api_base_url))

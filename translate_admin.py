@@ -1,8 +1,11 @@
 import json
 import re
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent
 
 # 1. Добавляем админские переводы в словарь
-LOCALES_FILE = "/root/ReSave/locales.json"
+LOCALES_FILE = str(_PROJECT_ROOT / "locales.json")
 with open(LOCALES_FILE, 'r', encoding='utf-8') as f:
     locales = json.load(f)
 
@@ -336,7 +339,7 @@ def register_admin_handlers(router: Router):
     router.callback_query.register(callback_admin_back, lambda c: c.data == "admin_back")
 '''
 
-with open("/root/ReSave/src/handlers/admin_handlers.py", "w", encoding="utf-8") as f:
+with open(_PROJECT_ROOT / "src" / "handlers" / "admin_handlers.py", "w", encoding="utf-8") as f:
     f.write(admin_code)
 
 print("✅ Админ-панель успешно переведена и обновлена!")

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import asyncio
+from pathlib import Path
+
 from playwright.async_api import async_playwright
+
+STATE_FILE = str(Path(__file__).resolve().parent / "state.json")
 
 async def main():
     async with async_playwright() as p:
@@ -20,7 +24,7 @@ async def main():
         page = await context.new_page()
         await page.goto("https://www.youtube.com/", timeout=120000)
         input("👉 Войдите в YouTube в открывшемся браузере, затем нажмите Enter здесь...")
-        await context.storage_state(path="/root/ReSave/state.json")
+        await context.storage_state(path=STATE_FILE)
         print("✅ Состояние сохранено")
         await browser.close()
 

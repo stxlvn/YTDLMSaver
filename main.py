@@ -53,7 +53,7 @@ def acquire_instance_lock(lock_path: str | os.PathLike | None = None):
     """Hold an advisory process lock for the lifetime of the returned file."""
     import fcntl
 
-    path = Path(lock_path or (Path(__file__).resolve().parent / ".resave.lock"))
+    path = Path(lock_path or (Path(__file__).resolve().parent / ".ytdlmsaver.lock"))
     lock_file = path.open("a+", encoding="ascii")
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -173,7 +173,7 @@ async def run():
                 "Функции конвертации (GIF/аудио) могут быть недоступны."
             )
             logger.warning(warning_text)
-            await notify_admins_async(bot, f"⚠️ [ReSave] {warning_text}")
+            await notify_admins_async(bot, f"⚠️ [YTDLMSaver] {warning_text}")
 
         download_manager.set_bot(sync_bot)
         set_download_manager(download_manager)
@@ -187,7 +187,7 @@ async def run():
         await setup_bot_commands(bot, BotCommand, BotCommandScopeChat)
 
         logger.info("=" * 50)
-        logger.info("ReSave запущен")
+        logger.info("YTDLMSaver запущен")
         logger.info("Групповой режим активирован")
         logger.info("=" * 50)
 
@@ -204,7 +204,7 @@ async def run():
 def main():
     instance_lock = acquire_instance_lock()
     if instance_lock is None:
-        logger.warning("ReSave уже запущен; повторный экземпляр завершен")
+        logger.warning("YTDLMSaver уже запущен; повторный экземпляр завершен")
         return
 
     try:
@@ -213,7 +213,7 @@ def main():
         logger.error("%s", exc)
         raise SystemExit(1)
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Завершение работы ReSave...")
+        logger.info("Завершение работы YTDLMSaver...")
     finally:
         instance_lock.close()
 

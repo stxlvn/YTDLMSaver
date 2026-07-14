@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-$HOME/ReSave}"
+APP_DIR="${APP_DIR:-$HOME/YTDLMSaver}"
 BOT_API_BIN="${BOT_API_BIN:-$HOME/.local/bin/telegram-bot-api}"
 BOT_API_HOST="${BOT_API_HOST:-127.0.0.1}"
 BOT_API_PORT="${BOT_API_PORT:-8081}"
@@ -64,7 +64,7 @@ acquire_lock() {
   fi
 
   if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-    log "Another ReSave service wrapper is already running: pid=$existing_pid"
+    log "Another YTDLMSaver service wrapper is already running: pid=$existing_pid"
     exit 1
   fi
 
@@ -147,7 +147,7 @@ wait_for_bot_api() {
 }
 
 start_bot() {
-  log "Starting ReSave bot"
+  log "Starting YTDLMSaver bot"
   "$PYTHON_BIN" main.py &
   BOT_PID=$!
 }
@@ -164,7 +164,7 @@ monitor_children() {
     if ! is_running "$BOT_PID"; then
       wait "$BOT_PID" 2>/dev/null
       local status=$?
-      log "ReSave bot exited with status $status"
+      log "YTDLMSaver bot exited with status $status"
       return "$status"
     fi
 

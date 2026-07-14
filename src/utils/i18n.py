@@ -1,8 +1,10 @@
 import json
 import os
+from pathlib import Path
 
-LANG_FILE = "/root/ReSave/user_langs.json"
-LOCALES_FILE = "/root/ReSave/locales.json"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LANG_FILE = str(_PROJECT_ROOT / "user_langs.json")
+LOCALES_FILE = str(_PROJECT_ROOT / "locales.json")
 
 DEFAULT_LOCALES = {
     "ru": {

@@ -1,7 +1,8 @@
 import json
 import os
+from pathlib import Path
 
-LOCALES_FILE = "/root/ReSave/locales.json"
+LOCALES_FILE = str(Path(__file__).resolve().parent / "locales.json")
 
 LOCALES = {
     "ru": {
