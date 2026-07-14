@@ -848,6 +848,32 @@ def _download_and_send_video(task, bot, temp_dir):
     variants = _get_download_variants(task, output_path)
     file_path = _download_first_available_variant(task, bot, work_dir, variants)
 
+    if not thumbnail_path and task.action not in {"audio", "gif"}:
+        frame_thumb = work_dir / "frame_thumb.jpg"
+        for offset in ("00:00:01", "00:00:00"):
+            try:
+                subprocess.run([
+                    'ffmpeg', '-y', '-ss', offset, '-i', str(file_path),
+                    '-frames:v', '1',
+                    '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
+                    '-q:v', '5', str(frame_thumb)
+                ], check=True, capture_output=True, timeout=30)
+            except Exception as frame_e:
+                logger.warning(
+                    f"Thumbnail: task_id={task.task_id} не удалось извлечь кадр видео (offset={offset}): {frame_e}"
+                )
+                continue
+            if frame_thumb.exists() and frame_thumb.stat().st_size > 0:
+                thumbnail_path = str(frame_thumb)
+                task.thumbnail_path = thumbnail_path
+                logger.info(
+                    f"Thumbnail: task_id={task.task_id} fallback - взят кадр видео (offset={offset}) "
+                    f"-> {thumbnail_path} ({os.path.getsize(thumbnail_path)} байт)"
+                )
+                break
+        else:
+            logger.warning(f"Thumbnail: task_id={task.task_id} fallback на кадр видео тоже не удался")
+
     if task.info.get("title"):
         title = task.info.get("title")
 
