@@ -771,74 +771,6 @@ def _download_and_send_video(task, bot, temp_dir):
     thumbnail_path = None
     work_dir = ensure_task_work_dir(task, temp_dir)
 
-    logger.info(f"Thumbnail: task_id={task.task_id} url={task.url} - готовим для всех источников")
-
-    try:
-        import requests
-        # task.info уже получен раньше (в handlers/download_processing.py)
-        # через yt-dlp с cookiefile - используем его thumbnail вместо
-        # повторного bare-запроса без cookies, который для части видео
-        # (например, возрастные ограничения) тихо не находит thumbnail.
-        thumbnail_url = (task.info or {}).get('thumbnail')
-        logger.info(
-            f"Thumbnail: task_id={task.task_id} thumbnail из task.info={thumbnail_url!r}"
-        )
-        if not thumbnail_url:
-            with yt_dlp.YoutubeDL({
-                'quiet': True,
-                'no_warnings': True,
-                'cookiefile': config.COOKIES_FILE,
-            }) as ydl:
-                info = ydl.extract_info(task.url, download=False)
-                thumbnail_url = info.get('thumbnail')
-            logger.info(
-                f"Thumbnail: task_id={task.task_id} thumbnail из повторного yt-dlp запроса={thumbnail_url!r}"
-            )
-
-        if not thumbnail_url:
-            logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить - yt-dlp не вернул thumbnail для {task.url}")
-        else:
-            response = requests.get(thumbnail_url, timeout=10)
-            logger.info(
-                f"Thumbnail: task_id={task.task_id} скачивание {thumbnail_url} -> HTTP {response.status_code}, "
-                f"{len(response.content) if response.ok else 0} байт"
-            )
-            if response.status_code != 200:
-                logger.warning(
-                    f"Thumbnail: task_id={task.task_id} не удалось подготовить - HTTP {response.status_code} при скачивании {thumbnail_url}"
-                )
-            else:
-                raw_thumb = work_dir / "raw_thumb.jpg"
-                tg_thumb = work_dir / "tg_thumb.jpg"
-                with open(raw_thumb, 'wb') as f:
-                    f.write(response.content)
-                try:
-                    subprocess.run([
-                        'ffmpeg', '-y', '-i', str(raw_thumb),
-                        '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
-                        '-q:v', '5', str(tg_thumb)
-                    ], check=True, capture_output=True)
-                    thumbnail_path = str(tg_thumb)
-                    task.thumbnail_path = thumbnail_path
-                    logger.info(
-                        f"Thumbnail: task_id={task.task_id} готово, resized -> {thumbnail_path} "
-                        f"({os.path.getsize(thumbnail_path)} байт)"
-                    )
-                except Exception as resize_e:
-                    logger.warning(f"Thumbnail: task_id={task.task_id} ошибка ресайза обложки: {resize_e}")
-                    thumbnail_path = str(raw_thumb)
-                    task.thumbnail_path = thumbnail_path
-                    logger.info(
-                        f"Thumbnail: task_id={task.task_id} готово (без ресайза, raw) -> {thumbnail_path} "
-                        f"({os.path.getsize(thumbnail_path)} байт)"
-                    )
-    except Exception as e:
-        logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить: {e}", exc_info=True)
-
-    logger.info(
-        f"Thumbnail: task_id={task.task_id} итог: thumbnail_path={thumbnail_path!r}"
-    )
-
     title = sanitize_filename(task.info.get("title") or task.info.get("id") or "video")
     output_path = str(work_dir / "media")
 
@@ -847,6 +779,80 @@ def _download_and_send_video(task, bot, temp_dir):
 
     variants = _get_download_variants(task, output_path)
     file_path = _download_first_available_variant(task, bot, work_dir, variants)
+
+    # Готовим thumbnail только теперь, ПОСЛЕ скачивания видео: _download_first_available_variant
+    # чистит work_dir в начале каждой попытки (_clear_work_dir), так что thumbnail,
+    # подготовленный до неё, гарантированно стирался с диска ещё до отправки -
+    # send_video потом молча уходил без превью (thumbnail_path указывал на
+    # уже несуществующий файл).
+    if task.action not in {"audio", "gif"}:
+        logger.info(f"Thumbnail: task_id={task.task_id} url={task.url} - готовим для всех источников")
+
+        try:
+            import requests
+            # task.info уже получен раньше (в handlers/download_processing.py)
+            # через yt-dlp с cookiefile - используем его thumbnail вместо
+            # повторного bare-запроса без cookies, который для части видео
+            # (например, возрастные ограничения) тихо не находит thumbnail.
+            thumbnail_url = (task.info or {}).get('thumbnail')
+            logger.info(
+                f"Thumbnail: task_id={task.task_id} thumbnail из task.info={thumbnail_url!r}"
+            )
+            if not thumbnail_url:
+                with yt_dlp.YoutubeDL({
+                    'quiet': True,
+                    'no_warnings': True,
+                    'cookiefile': config.COOKIES_FILE,
+                }) as ydl:
+                    info = ydl.extract_info(task.url, download=False)
+                    thumbnail_url = info.get('thumbnail')
+                logger.info(
+                    f"Thumbnail: task_id={task.task_id} thumbnail из повторного yt-dlp запроса={thumbnail_url!r}"
+                )
+
+            if not thumbnail_url:
+                logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить - yt-dlp не вернул thumbnail для {task.url}")
+            else:
+                response = requests.get(thumbnail_url, timeout=10)
+                logger.info(
+                    f"Thumbnail: task_id={task.task_id} скачивание {thumbnail_url} -> HTTP {response.status_code}, "
+                    f"{len(response.content) if response.ok else 0} байт"
+                )
+                if response.status_code != 200:
+                    logger.warning(
+                        f"Thumbnail: task_id={task.task_id} не удалось подготовить - HTTP {response.status_code} при скачивании {thumbnail_url}"
+                    )
+                else:
+                    raw_thumb = work_dir / "raw_thumb.jpg"
+                    tg_thumb = work_dir / "tg_thumb.jpg"
+                    with open(raw_thumb, 'wb') as f:
+                        f.write(response.content)
+                    try:
+                        subprocess.run([
+                            'ffmpeg', '-y', '-i', str(raw_thumb),
+                            '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
+                            '-q:v', '5', str(tg_thumb)
+                        ], check=True, capture_output=True)
+                        thumbnail_path = str(tg_thumb)
+                        task.thumbnail_path = thumbnail_path
+                        logger.info(
+                            f"Thumbnail: task_id={task.task_id} готово, resized -> {thumbnail_path} "
+                            f"({os.path.getsize(thumbnail_path)} байт)"
+                        )
+                    except Exception as resize_e:
+                        logger.warning(f"Thumbnail: task_id={task.task_id} ошибка ресайза обложки: {resize_e}")
+                        thumbnail_path = str(raw_thumb)
+                        task.thumbnail_path = thumbnail_path
+                        logger.info(
+                            f"Thumbnail: task_id={task.task_id} готово (без ресайза, raw) -> {thumbnail_path} "
+                            f"({os.path.getsize(thumbnail_path)} байт)"
+                        )
+        except Exception as e:
+            logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить: {e}", exc_info=True)
+
+        logger.info(
+            f"Thumbnail: task_id={task.task_id} итог после CDN/yt-dlp попытки: thumbnail_path={thumbnail_path!r}"
+        )
 
     if not thumbnail_path and task.action not in {"audio", "gif"}:
         frame_thumb = work_dir / "frame_thumb.jpg"
