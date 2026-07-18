@@ -3,13 +3,11 @@ import logging
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-import config
 from aiogram import Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from .download_processing import extract_video_info as _extract_video_info, handle_group_download as _handle_group_download
-from ..utils.message_templates import ErrorMessages
 from ..utils.ui_manager import get_ui_manager
 from ..utils.i18n import i18n
 
@@ -30,10 +28,6 @@ def set_download_manager(manager):
     _download_manager = manager
 
 def get_download_manager(): return _download_manager
-
-def _build_download_limit_text(chat_id: int) -> str:
-    active = _download_manager.get_user_task_count(chat_id) if _download_manager else 0
-    return get_ui_manager().format_panel(i18n.get(chat_id, "limit_title"), [i18n.get(chat_id, "err_concurrent"), "", i18n.get(chat_id, "limit_active", active=active, max=config.MAX_DOWNLOADS_PER_USER)], icon="⏸️")
 
 def get_markup_builder(chat_id):
     def builder(message_id, info, resolutions):
@@ -257,30 +251,25 @@ def register_download_handlers(router: Router, sync_bot):
             def _bg_photo_task():
                 from src.core.video_info import fetch_video_info
                 info = fetch_video_info(url) or {}
-                try:
-                    _download_manager.add_task(
-                        url=url,
-                        chat_id=chat_id,
-                        message_id=s_msg.message_id,
-                        info={"title": info.get("title", ""), "description": info.get("description", ""), "duration": None},
-                        action="tiktok_photo" if is_tt else "instagram_photo",
-                        reply_to_id=message.message_id
-                    )
-                except ValueError:
-                    try: sync_bot.edit_message_text(_build_download_limit_text(chat_id), chat_id, s_msg.message_id)
-                    except Exception: pass
+                _download_manager.add_task(
+                    url=url,
+                    chat_id=chat_id,
+                    message_id=s_msg.message_id,
+                    info={"title": info.get("title", ""), "description": info.get("description", ""), "duration": None},
+                    action="tiktok_photo" if is_tt else "instagram_photo",
+                    reply_to_id=message.message_id
+                )
 
             _run_background_thread(_bg_photo_task, label=f"bg_photo:{chat_id}:{message.message_id}")
             return
 
         if any(x in url.lower() for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts']):
             s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fast_title"), [i18n.get(chat_id, "status_fast_desc")], icon="⚡"))
-            try: _download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info={"title": "", "duration": None}, action="best", reply_to_id=message.message_id)
-            except ValueError: await s_msg.edit_text(_build_download_limit_text(chat_id))
+            _download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info={"title": "", "duration": None}, action="best", reply_to_id=message.message_id)
             return
 
         s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_search_title"), [i18n.get(chat_id, "status_search_desc")], icon="🔍"))
-        _run_background_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, label=f"video_info:{chat_id}:{message.message_id}", download_manager=_download_manager, build_download_limit_text=_build_download_limit_text, build_download_markup=get_markup_builder(chat_id))
+        _run_background_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, label=f"video_info:{chat_id}:{message.message_id}", download_manager=_download_manager, build_download_markup=get_markup_builder(chat_id))
 
     async def handle_download(call: CallbackQuery):
         parts = call.data.split("_")
@@ -288,13 +277,9 @@ def register_download_handlers(router: Router, sync_bot):
         chat_id = call.message.chat.id
         if orig_id not in video_info_cache: return await call.answer(i18n.get(chat_id, "err_expired"))
         dl_info = video_info_cache[orig_id]
-        if not _download_manager.can_add_task(chat_id):
-            await call.answer(i18n.get(chat_id, "err_limit_alert"), show_alert=True)
-            return await call.message.edit_text(_build_download_limit_text(chat_id))
         await call.answer(i18n.get(chat_id, "status_add_queue_alert"))
         await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_add_queue_title"), [i18n.get(chat_id, "status_add_queue_desc")], icon="📥"))
-        try: _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None)
-        except ValueError: return await call.message.edit_text(_build_download_limit_text(chat_id))
+        _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None)
         video_info_cache.pop(orig_id, None)
 
     async def handle_cancel_all(call: CallbackQuery):

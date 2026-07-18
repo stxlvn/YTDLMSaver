@@ -28,5 +28,4 @@ user_langs.json
 
 test_config.py
 venv/
-tests/
 .env*

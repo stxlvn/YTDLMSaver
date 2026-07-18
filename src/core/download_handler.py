@@ -1,5 +1,4 @@
 import logging
-import multiprocessing
 import os
 import shutil
 import subprocess
@@ -10,7 +9,6 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from queue import Empty, Full
 
 import yt_dlp
 import config
@@ -192,11 +190,6 @@ def get_available_actions_optimized(url):
         return default_actions, None
 
 
-# --- Изоляция скачивания yt-dlp в отдельном процессе (из origin/main) ---
-# Раньше yt-dlp.extract_info(download=True) выполнялся прямо в воркер-треде:
-# зависший процесс/сеть вешал воркер навсегда без таймаута. Здесь скачивание
-# идёт в дочернем процессе с жёстким дедлайном - зависший процесс просто убивается.
-
 @dataclass(frozen=True)
 class DownloadVariant:
     label: str
@@ -205,23 +198,27 @@ class DownloadVariant:
     output_template: str
 
 
-def _queue_event(event_queue, event: tuple, *, block: bool = False):
-    try:
-        if block:
-            event_queue.put(event, timeout=5)
-        else:
-            event_queue.put_nowait(event)
-    except Full:
-        pass
+def _download_with_timeout(url: str, ydl_params: dict, timeout_seconds: int, task):
+    # Раньше yt-dlp скачивался в отдельном форкнутом процессе с IPC-очередью,
+    # чтобы зависшая сеть не вешала воркер навсегда. На shared-хостинге с
+    # ограниченной памятью форк дублирует адресное пространство процесса и
+    # сам по себе мог провоцировать OOM/SIGKILL. Таймаут, отмена и stall-
+    # таймаут теперь проверяются прямо в progress_hook (yt-dlp вызывает его
+    # без try/except - см. downloader/common.py:_hook_progress - так что
+    # исключение из хука долетает наружу через ydl.download()).
+    task.progress = 0.0
+    task.speed_bytes_per_sec = 0.0
+    task.stage = "download"
+    task.stage_started_at = time.time()
 
+    started_at = time.monotonic()
+    deadline = started_at + timeout_seconds
+    last_activity = started_at
 
-def _yt_dlp_download_worker(url: str, ydl_params: dict, event_queue):
     # bestvideo+bestaudio скачивается как ДВА отдельных файла в рамках одного
     # ydl.download(): видео-поток 0->100%, затем аудио-поток заново с 0->100%.
-    # Раньше прогресс брался только с текущего файла, поэтому бар откатывался
-    # к нулю на середине и выглядело, будто скачивает то же самое видео дважды.
-    # Здесь суммируем downloaded/total по всем виденным файлам, чтобы бар
-    # был монотонным и отражал прогресс по всей задаче целиком.
+    # Суммируем downloaded/total по всем виденным файлам, чтобы бар был
+    # монотонным и отражал прогресс по всей задаче целиком.
     file_totals: dict[str, int] = {}
     file_downloaded: dict[str, int] = {}
     # Пока не увидим hook для второго (аудио) файла, его размер неизвестен,
@@ -242,120 +239,57 @@ def _yt_dlp_download_worker(url: str, ydl_params: dict, event_queue):
             overall_downloaded = max_ratio_seen * overall_total
         else:
             max_ratio_seen = ratio
-        _queue_event(event_queue, ("progress", overall_downloaded, overall_total, speed))
+        task.progress = min(1.0, max(0.0, overall_downloaded / overall_total))
+        task.speed_bytes_per_sec = speed or 0
 
     def progress_hook(data):
+        nonlocal last_activity
+        now = time.monotonic()
+
+        if task.cancel_event.is_set():
+            raise RuntimeError("Загрузка отменена пользователем")
+        if now >= deadline:
+            raise TimeoutError(f"Download timed out after {timeout_seconds} seconds")
+
         status = data.get("status")
         filename = data.get("filename") or data.get("tmpfilename") or "unknown"
         if status == "downloading":
-            total = data.get("total_bytes") or data.get("total_bytes_estimate")
             downloaded = data.get("downloaded_bytes", 0)
+            # Активность по downloaded_bytes отслеживаем независимо от того,
+            # известен ли total - иначе поток без Content-Length (например
+            # некоторые live/fragment-форматы) ловил бы stall-таймаут, даже
+            # активно скачиваясь, просто потому что total никогда не появляется.
+            if file_downloaded.get(filename) != downloaded:
+                last_activity = now
+            total = data.get("total_bytes") or data.get("total_bytes_estimate")
             speed = data.get("speed") or 0
             if total:
                 file_totals[filename] = total
                 file_downloaded[filename] = downloaded
                 _emit_combined(speed)
+            else:
+                file_downloaded[filename] = downloaded
         elif status == "finished":
             total = data.get("total_bytes") or file_totals.get(filename)
             if total:
                 file_totals[filename] = total
                 file_downloaded[filename] = total
                 _emit_combined(0)
+            last_activity = now
 
-    try:
-        child_params = dict(ydl_params)
-        child_params["progress_hooks"] = [progress_hook]
-        with yt_dlp.YoutubeDL(child_params) as ydl:
-            ydl.download([url])
-    except BaseException as exc:
-        _queue_event(event_queue, ("error", type(exc).__name__, str(exc)), block=True)
-    else:
-        _queue_event(event_queue, ("ok", "", ""), block=True)
-
-
-def _stop_process(process: multiprocessing.Process):
-    if not process.is_alive():
-        return
-
-    process.terminate()
-    process.join(5)
-    if process.is_alive():
-        process.kill()
-        process.join(5)
-
-
-def _drain_download_events(event_queue, task) -> tuple | None:
-    result = None
-
-    while True:
-        try:
-            event = event_queue.get_nowait()
-        except Empty:
-            return result
-
-        event_type = event[0]
-        if event_type == "progress":
-            _, downloaded, total, speed = event
-            if total:
-                task.progress = min(1.0, max(0.0, downloaded / total))
-            task.speed_bytes_per_sec = speed or 0
-        elif event_type in {"ok", "error"}:
-            result = event
-
-
-def _download_with_timeout(url: str, ydl_params: dict, timeout_seconds: int, task):
-    child_params = dict(ydl_params)
-    child_params.pop("progress_hooks", None)
-
-    task.progress = 0.0
-    task.speed_bytes_per_sec = 0.0
-    task.stage = "download"
-    task.stage_started_at = time.time()
-    event_queue = multiprocessing.Queue(maxsize=100)
-    process = multiprocessing.Process(
-        target=_yt_dlp_download_worker,
-        args=(url, child_params, event_queue),
-        daemon=True,
-    )
-    process.start()
-
-    deadline = time.monotonic() + timeout_seconds
-    result = None
-
-    while process.is_alive():
-        drained = _drain_download_events(event_queue, task)
-        if drained:
-            result = drained
-
-        if task.cancel_event.is_set():
-            _stop_process(process)
-            raise RuntimeError("Загрузка отменена пользователем")
-
-        if time.monotonic() >= deadline:
-            _stop_process(process)
-            raise TimeoutError(f"Download timed out after {timeout_seconds} seconds")
-
-        process.join(0.25)
-
-    drained = _drain_download_events(event_queue, task)
-    if drained:
-        result = drained
-
-    if result:
-        status, error_type, message = result
-        if status == "ok":
-            task.progress = 1.0
-            return
-        raise RuntimeError(f"{error_type}: {message}")
-
-    if process.exitcode:
-        if process.exitcode < 0:
-            signal_number = abs(process.exitcode)
-            raise RuntimeError(
-                "yt-dlp download process was killed by server "
-                f"(signal {signal_number}, exit code {process.exitcode})"
+        if now - last_activity >= config.DOWNLOAD_STALL_TIMEOUT_SECONDS:
+            raise TimeoutError(
+                "Download made no progress for "
+                f"{config.DOWNLOAD_STALL_TIMEOUT_SECONDS} seconds"
             )
-        raise RuntimeError(f"yt-dlp exited with code {process.exitcode}")
+
+    params = dict(ydl_params)
+    params["progress_hooks"] = [progress_hook]
+
+    with yt_dlp.YoutubeDL(params) as ydl:
+        ydl.download([url])
+
+    task.progress = 1.0
 
 
 def _base_ydl_params(variant: "DownloadVariant") -> dict:
@@ -364,9 +298,12 @@ def _base_ydl_params(variant: "DownloadVariant") -> dict:
         "outtmpl": variant.output_template,
         "quiet": True,
         "no_warnings": True,
+        "noprogress": True,
         "noplaylist": True,
         "merge_output_format": "mp4",
         "http_chunk_size": 5 * 1024 * 1024,
+        "buffersize": 64 * 1024,
+        "noresizebuffer": True,
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
@@ -508,20 +445,15 @@ def _download_first_available_variant(task, bot, work_dir, variants: list["Downl
 def _height_format(height: int, *, exact_first: bool = False) -> str:
     if exact_first:
         return (
-            f"best[height={height}][ext=mp4]/"
-            f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/"
             f"bv*[height={height}]+ba/"
-            f"best[height<={height}][ext=mp4]/"
-            f"best[height<={height}]/"
-            f"bv*[height<={height}][ext=mp4]+ba[ext=m4a]/"
-            f"bv*[height<={height}]+ba/best"
+            f"b[height={height}]/"
+            f"bv*[height<={height}]+ba/"
+            f"b[height<={height}]"
         )
 
     return (
-        f"best[height<={height}][ext=mp4]/"
-        f"best[height<={height}]/"
-        f"bv*[height<={height}][ext=mp4]+ba[ext=m4a]/"
-        f"bv*[height<={height}]+ba/best"
+        f"bv*[height<={height}]+ba/"
+        f"b[height<={height}]"
     )
 
 
@@ -536,7 +468,6 @@ def _unique_heights(values: list[int]) -> list[int]:
 
 
 def _video_height_variants(output_path: str, heights: list[int], *, exact_first: bool = False):
-    capped_heights = [min(height, config.MAX_DOWNLOAD_HEIGHT) for height in heights]
     return [
         DownloadVariant(
             label=f"{height}p",
@@ -544,13 +475,28 @@ def _video_height_variants(output_path: str, heights: list[int], *, exact_first:
             postprocessors=(),
             output_template=f"{output_path}.%(ext)s",
         )
-        for index, height in enumerate(_unique_heights(capped_heights))
+        for index, height in enumerate(_unique_heights(heights))
     ]
 
 
 def _get_download_variants(task, output_path) -> list["DownloadVariant"]:
     if task.action == "best":
-        return _video_height_variants(output_path, [config.MAX_DOWNLOAD_HEIGHT, 720, 480, 360])
+        maximum_variant = DownloadVariant(
+            label="максимальное качество",
+            format="bv*+ba/b",
+            postprocessors=(),
+            output_template=f"{output_path}.%(ext)s",
+        )
+        available_heights = sorted(
+            {
+                int(item["height"])
+                for item in task.info.get("formats", [])
+                if item.get("height") and item.get("vcodec", "none") != "none"
+            },
+            reverse=True,
+        )
+        fallback_heights = available_heights or [4320, 2160, 1440, 1080, 720, 480, 360]
+        return [maximum_variant, *_video_height_variants(output_path, fallback_heights)]
 
     if task.action == "medium":
         return _video_height_variants(output_path, [720, 480, 360])
@@ -578,8 +524,8 @@ def _get_download_variants(task, output_path) -> list["DownloadVariant"]:
         return _video_height_variants(output_path, [480, 360])
 
     if task.action == "res" and task.format_param:
-        height = min(int(task.format_param), config.MAX_DOWNLOAD_HEIGHT)
-        fallback_heights = [candidate for candidate in [1080, 720, 480, 360] if candidate < height]
+        height = int(task.format_param)
+        fallback_heights = [candidate for candidate in [2160, 1440, 1080, 720, 480, 360] if candidate < height]
         return _video_height_variants(
             output_path,
             [height, *fallback_heights],
@@ -928,7 +874,7 @@ def _download_and_send_video(task, bot, temp_dir):
 
     task.file_path = str(file_path)
     file_size_bytes = os.path.getsize(file_path)
-    file_size_error = build_file_size_limit_error(task.chat_id, file_size_bytes)
+    file_size_error = build_file_size_limit_error(file_size_bytes)
     if file_size_error:
         raise RuntimeError(file_size_error)
 

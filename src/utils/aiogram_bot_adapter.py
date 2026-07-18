@@ -111,6 +111,7 @@ class AiogramSyncBotAdapter:
         *,
         filename: str | None = None,
         on_progress: Callable[[int, int], None] | None = None,
+        local_upload: bool = False,
     ):
         if isinstance(file_obj, (FSInputFile, BufferedInputFile)):
             return file_obj
@@ -118,6 +119,14 @@ class AiogramSyncBotAdapter:
         if isinstance(file_obj, (str, os.PathLike)):
             path = str(file_obj)
             if os.path.exists(path):
+                if local_upload and self._is_local_api():
+                    # telegram-bot-api --local читает файл напрямую с общей
+                    # файловой системы - для этого нужен file:// URI, голый
+                    # /абсолютный/путь Bot API интерпретирует как битый HTTP URL.
+                    # Прогресс тут не наблюдаем: реальная медленная часть (аплоад
+                    # с telegram-bot-api на серверы Telegram) и так была не видна
+                    # нашему коду ни при каком способе передачи файла.
+                    return Path(path).resolve().as_uri()
                 if on_progress is not None:
                     return ProgressTrackingFSInputFile(
                         path, on_progress, filename=filename or Path(path).name
@@ -207,12 +216,12 @@ class AiogramSyncBotAdapter:
 
     def send_photo(self, chat_id, photo, **kwargs):
         payload = self._normalize_kwargs(kwargs)
-        photo_input = self._prepare_file(photo)
+        photo_input = self._prepare_file(photo, local_upload=True)
         return self._call(self.bot.send_photo(chat_id=chat_id, photo=photo_input, **payload))
 
     def send_video(self, chat_id, video, on_progress=None, **kwargs):
         payload = self._normalize_kwargs(kwargs)
-        video_input = self._prepare_file(video, on_progress=on_progress)
+        video_input = self._prepare_file(video, on_progress=on_progress, local_upload=True)
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_video(
                 chat_id=chat_id,
@@ -232,7 +241,7 @@ class AiogramSyncBotAdapter:
         payload = self._normalize_kwargs(kwargs)
         visible_file_name = payload.pop("_visible_file_name", None)
         document_input = self._prepare_file(
-            document, filename=visible_file_name, on_progress=on_progress
+            document, filename=visible_file_name, on_progress=on_progress, local_upload=True
         )
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_document(
@@ -253,7 +262,7 @@ class AiogramSyncBotAdapter:
 
     def send_audio(self, chat_id, audio, on_progress=None, **kwargs):
         payload = self._normalize_kwargs(kwargs)
-        audio_input = self._prepare_file(audio, on_progress=on_progress)
+        audio_input = self._prepare_file(audio, on_progress=on_progress, local_upload=True)
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_audio(
                 chat_id=chat_id,
@@ -271,7 +280,7 @@ class AiogramSyncBotAdapter:
 
     def send_animation(self, chat_id, animation, **kwargs):
         payload = self._normalize_kwargs(kwargs)
-        animation_input = self._prepare_file(animation)
+        animation_input = self._prepare_file(animation, local_upload=True)
         return self._call_with_cloud_fallback(
             local_coro_factory=lambda: self.bot.send_animation(
                 chat_id=chat_id,
