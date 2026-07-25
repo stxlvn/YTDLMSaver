@@ -218,25 +218,25 @@ def register_admin_handlers(router: Router):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
         await state.clear()
-        await message.reply(_build_admin_panel_text(chat_id), reply_markup=_build_admin_keyboard(chat_id))
+        await message.reply(_build_admin_panel_text(chat_id), reply_markup=_build_admin_keyboard(chat_id), parse_mode="HTML")
 
     async def broadcast_command(message: Message, state: FSMContext):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
         await state.set_state(BroadcastStates.waiting_for_message)
-        await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣"), reply_markup=_build_broadcast_waiting_keyboard(chat_id))
+        await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣"), reply_markup=_build_broadcast_waiting_keyboard(chat_id), parse_mode="HTML")
 
     async def process_broadcast_message(message: Message, state: FSMContext):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
         payload = _extract_broadcast_payload(message)
         if payload is None:
-            return await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_err_title"), [i18n.get(chat_id, "admin_bc_err_desc")], icon="⚠️"))
+            return await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_err_title"), [i18n.get(chat_id, "admin_bc_err_desc")], icon="⚠️"), parse_mode="HTML")
 
         user_ids = list(get_stats_manager().get_all_stats().keys())
         if not user_ids:
             await state.clear()
-            return await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_no_users"), [i18n.get(chat_id, "admin_bc_no_users_desc")], icon="📣"))
+            return await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_no_users"), [i18n.get(chat_id, "admin_bc_no_users_desc")], icon="📣"), parse_mode="HTML")
 
         broadcast_cache[message.from_user.id] = {"payload": payload, "user_ids": user_ids, "total": len(user_ids)}
         await state.clear()
@@ -245,30 +245,30 @@ def register_admin_handlers(router: Router):
             InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes"), callback_data="broadcast_confirm"),
             InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel")
         ]])
-        await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_confirm"), [i18n.get(chat_id, "admin_bc_receivers", c=len(user_ids)), "", i18n.get(chat_id, "admin_bc_continue")], icon="📣"), reply_markup=kbd)
+        await message.reply(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_confirm"), [i18n.get(chat_id, "admin_bc_receivers", c=len(user_ids)), "", i18n.get(chat_id, "admin_bc_continue")], icon="📣"), reply_markup=kbd, parse_mode="HTML")
 
     async def stats_global_command(message: Message):
         if not message.from_user or not is_admin(message.from_user.id): return
-        await message.reply(_build_global_stats_text(message.chat.id))
+        await message.reply(_build_global_stats_text(message.chat.id), parse_mode="HTML")
 
     async def callback_admin_stats_global(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await call.answer()
-        await call.message.edit_text(_build_global_stats_text(chat_id), reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(_build_global_stats_text(chat_id), reply_markup=_build_back_keyboard(chat_id), parse_mode="HTML")
 
     async def callback_admin_broadcast(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await state.set_state(BroadcastStates.waiting_for_message)
         await call.answer()
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣"), reply_markup=_build_broadcast_waiting_keyboard(chat_id))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣"), reply_markup=_build_broadcast_waiting_keyboard(chat_id), parse_mode="HTML")
 
     async def callback_admin_user_list(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await call.answer()
-        await call.message.edit_text(_build_user_list_text(chat_id), reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(_build_user_list_text(chat_id), reply_markup=_build_back_keyboard(chat_id), parse_mode="HTML")
 
     async def callback_admin_clear_db(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
@@ -278,14 +278,14 @@ def register_admin_handlers(router: Router):
             InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes_clear"), callback_data="admin_clear_confirm"),
             InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="admin_back")
         ]])
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_clear_title"), [i18n.get(chat_id, "admin_clear_q1"), i18n.get(chat_id, "admin_clear_q2")], icon="⚠️"), reply_markup=kbd)
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_clear_title"), [i18n.get(chat_id, "admin_clear_q1"), i18n.get(chat_id, "admin_clear_q2")], icon="⚠️"), reply_markup=kbd, parse_mode="HTML")
 
     async def callback_admin_clear_confirm(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         get_stats_manager().clear_all_stats()
         await call.answer(i18n.get(chat_id, "admin_clear_done"))
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_clear_done"), [i18n.get(chat_id, "admin_clear_success")], icon="✅"), reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_clear_done"), [i18n.get(chat_id, "admin_clear_success")], icon="✅"), reply_markup=_build_back_keyboard(chat_id), parse_mode="HTML")
 
     async def callback_broadcast_confirm(call: CallbackQuery, bot: Bot):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
@@ -295,7 +295,7 @@ def register_admin_handlers(router: Router):
         await call.answer()
 
         payload, user_ids, total_users = data["payload"], data["user_ids"], data["total"]
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_started"), [i18n.get(chat_id, "admin_bc_sent", s=0, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=0)], icon="📣"))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_started"), [i18n.get(chat_id, "admin_bc_sent", s=0, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=0)], icon="📣"), parse_mode="HTML")
 
         sent = failed = 0
         for index, uid in enumerate(user_ids, start=1):
@@ -305,11 +305,11 @@ def register_admin_handlers(router: Router):
             except Exception as exc:
                 failed += 1
             if index % 10 == 0 or index == total_users:
-                try: await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_progress"), [i18n.get(chat_id, "admin_bc_sent", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="📣"))
+                try: await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_progress"), [i18n.get(chat_id, "admin_bc_sent", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="📣"), parse_mode="HTML")
                 except Exception: pass
 
         broadcast_cache.pop(call.from_user.id, None)
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_finished"), [i18n.get(chat_id, "admin_bc_success_count", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="✅"), reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_finished"), [i18n.get(chat_id, "admin_bc_success_count", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="✅"), reply_markup=_build_back_keyboard(chat_id), parse_mode="HTML")
 
     async def callback_broadcast_cancel(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
@@ -317,14 +317,14 @@ def register_admin_handlers(router: Router):
         await state.clear()
         broadcast_cache.pop(call.from_user.id, None)
         await call.answer(i18n.get(chat_id, "admin_bc_cancelled"))
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕"), reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕"), reply_markup=_build_back_keyboard(chat_id), parse_mode="HTML")
 
     async def callback_admin_back(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await state.clear()
         await call.answer()
-        await call.message.edit_text(_build_admin_panel_text(chat_id), reply_markup=_build_admin_keyboard(chat_id))
+        await call.message.edit_text(_build_admin_panel_text(chat_id), reply_markup=_build_admin_keyboard(chat_id), parse_mode="HTML")
 
     router.message.register(admin_command, Command("admin"))
     router.message.register(broadcast_command, Command("broadcast"))

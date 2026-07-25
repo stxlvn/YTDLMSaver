@@ -231,7 +231,7 @@ def register_download_handlers(router: Router, sync_bot):
         chat_id = message.chat.id
         if not url:
             if message.chat.type == "private":
-                await message.reply(ui_manager.format_panel(i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"))
+                await message.reply(ui_manager.format_panel(i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"), parse_mode="HTML")
             return
 
         is_ig = "instagram.com/p/" in url.lower()
@@ -245,7 +245,7 @@ def register_download_handlers(router: Router, sync_bot):
 
         if is_tt or is_ig:
             if is_tt and '/photo/' in url.lower(): url = re.sub(r'/photo/', '/video/', url, flags=re.IGNORECASE)
-            s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_photo_title"), [i18n.get(chat_id, "status_photo_desc")], icon="🖼️"))
+            s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_photo_title"), [i18n.get(chat_id, "status_photo_desc")], icon="🖼️"), parse_mode="HTML")
 
             # Фоновый сбор оригинального текста для картинок перед стартом загрузки
             def _bg_photo_task():
@@ -264,11 +264,11 @@ def register_download_handlers(router: Router, sync_bot):
             return
 
         if any(x in url.lower() for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts']):
-            s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fast_title"), [i18n.get(chat_id, "status_fast_desc")], icon="⚡"))
+            s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fast_title"), [i18n.get(chat_id, "status_fast_desc")], icon="⚡"), parse_mode="HTML")
             _download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info={"title": "", "duration": None}, action="best", reply_to_id=message.message_id)
             return
 
-        s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_search_title"), [i18n.get(chat_id, "status_search_desc")], icon="🔍"))
+        s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_search_title"), [i18n.get(chat_id, "status_search_desc")], icon="🔍"), parse_mode="HTML")
         _run_background_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, label=f"video_info:{chat_id}:{message.message_id}", download_manager=_download_manager, build_download_markup=get_markup_builder(chat_id))
 
     async def handle_download(call: CallbackQuery):
@@ -278,7 +278,7 @@ def register_download_handlers(router: Router, sync_bot):
         if orig_id not in video_info_cache: return await call.answer(i18n.get(chat_id, "err_expired"))
         dl_info = video_info_cache[orig_id]
         await call.answer(i18n.get(chat_id, "status_add_queue_alert"))
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_add_queue_title"), [i18n.get(chat_id, "status_add_queue_desc")], icon="📥"))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_add_queue_title"), [i18n.get(chat_id, "status_add_queue_desc")], icon="📥"), parse_mode="HTML")
         _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None)
         video_info_cache.pop(orig_id, None)
 
@@ -289,12 +289,12 @@ def register_download_handlers(router: Router, sync_bot):
         if not user_tasks: return await call.answer(i18n.get(chat_id, "status_no_active"))
         cc = sum(1 for tid in user_tasks if _download_manager.cancel_task(tid))
         await call.answer(i18n.get(chat_id, "status_cancelled_count", count=cc))
-        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅ "))
+        await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅ "), parse_mode="HTML")
 
     async def handle_cancel(call: CallbackQuery):
         await call.answer()
         try: await call.message.delete()
-        except Exception: await call.message.edit_text(ui_manager.format_panel("Отменено", icon="✕"))
+        except Exception: await call.message.edit_text(ui_manager.format_panel("Отменено", icon="✕"), parse_mode="HTML")
 
     router.message.register(process_url_message, StateFilter(None), lambda m: bool((m.text or m.caption) and not (m.text or m.caption or "").strip().startswith("/")))
     router.callback_query.register(handle_download, lambda c: bool(c.data and c.data.startswith("dl_")))

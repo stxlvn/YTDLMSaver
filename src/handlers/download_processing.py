@@ -1,4 +1,5 @@
 from __future__ import annotations
+import html
 import logging
 import re
 import config
@@ -14,7 +15,22 @@ def is_telegram_link(url: str) -> bool:
     return bool(re.match(r'^https?://(t\.me|telegram\.me)/', url))
 
 
+def _format_duration(seconds) -> str:
+    try:
+        total = int(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if total <= 0:
+        return ""
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def _safe_edit_message_text(bot, text: str, chat_id: int, message_id: int, **kwargs) -> bool:
+    kwargs.setdefault("parse_mode", "HTML")
     try:
         bot.edit_message_text(text, chat_id, message_id, **kwargs)
         return True
@@ -102,13 +118,11 @@ def queue_playlist_downloads(
 
 def build_playlist_queued_text(info: dict, queued_count: int) -> str:
     ui_manager = get_ui_manager()
-    playlist_title = info.get("title") or "Плейлист"
+    playlist_title = html.escape(info.get("title") or "Плейлист")
     return ui_manager.format_panel(
-        "Плейлист в очереди",
+        playlist_title,
         [
-            f"Название: {playlist_title}",
-            f"Видео в очереди: {queued_count}",
-            "Качество: максимальное доступное",
+            f"Видео в очереди: {queued_count} · качество максимальное доступное",
             "",
             "Файлы будут приходить по мере готовности.",
         ],
@@ -259,13 +273,12 @@ def extract_video_info(
         }
 
         markup = build_download_markup(user_message_id, info, resolutions)
+        title = html.escape(info.get('title') or 'video')
+        meta_parts = [part for part in (_format_duration(info.get('duration')), info.get('extractor_key')) if part]
+        meta_line = html.escape(" · ".join(meta_parts)) if meta_parts else i18n.get(chat_id, "status_found_desc")
         _safe_edit_message_text(
             bot,
-            ui_manager.format_panel(
-                i18n.get(chat_id, "status_found_title"),
-                [f"🎬 {info.get('title', 'video')}", "", i18n.get(chat_id, "status_found_desc")],
-                icon="✅",
-            ),
+            ui_manager.format_panel(title, [meta_line]),
             chat_id,
             status_message_id,
             reply_markup=markup,
@@ -278,7 +291,7 @@ def extract_video_info(
         else:
             _safe_edit_message_text(
                 bot,
-                ui_manager.format_panel(i18n.get(chat_id, "status_processing_err"), [error_text], icon="❌"),
+                ui_manager.format_panel(i18n.get(chat_id, "status_processing_err"), [html.escape(error_text)], icon="❌"),
                 chat_id,
                 status_message_id,
             )
