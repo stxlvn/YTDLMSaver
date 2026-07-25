@@ -1,3 +1,4 @@
+import html
 import logging
 import time
 from datetime import datetime
@@ -17,6 +18,7 @@ def register_command_handlers(router: Router):
     ui_manager = get_ui_manager()
 
     async def safe_reply(m: Message, text: str, **kwargs):
+        kwargs.setdefault("parse_mode", "HTML")
         try:
             return await m.reply(text, **kwargs)
         except (TelegramBadRequest, TelegramForbiddenError) as exc:
@@ -28,7 +30,7 @@ def register_command_handlers(router: Router):
         chat_id = m.chat.id
         text_lines = i18n.get(chat_id, "menu_welcome").split("\n")
         footer_text = i18n.get(chat_id, "menu_footer")
-        await safe_reply(m, ui_manager.format_panel("YTDLMSaver", text_lines, icon="⚡", footer=footer_text))
+        await safe_reply(m, ui_manager.format_panel("YTDLMSaver", text_lines, footer=footer_text))
 
     async def help_command(m: Message, state: FSMContext):
         await state.clear()
@@ -54,7 +56,7 @@ def register_command_handlers(router: Router):
         i18n.set_lang(uid, lang)
         if uid != chat_id:
             i18n.set_lang(chat_id, lang)
-        await c.message.edit_text(i18n.get(chat_id, "lang_changed"))
+        await c.message.edit_text(i18n.get(chat_id, "lang_changed"), parse_mode="HTML")
         await c.answer()
 
     async def status_command(m: Message, state: FSMContext):
@@ -70,21 +72,23 @@ def register_command_handlers(router: Router):
             return await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_no_downloads"), [i18n.get(chat_id, "status_no_downloads_desc")], icon="✅"))
         lines = []
         for t in user_tasks.values():
-            lines.append(f"🎬 {t.info.get('title', 'Video')}")
+            title = html.escape(t.info.get('title') or 'Video')
             if t.status == "downloading":
                 is_upload = t.stage == "upload"
                 stage_started_at = t.stage_started_at or t.started_at
-                lines.append(f"{'⬆️' if is_upload else '⬇️'} {ui_manager.create_progress_bar(t.progress)}")
+                lines.append(f"{'⬆️' if is_upload else '⬇️'} <b>{title}</b>")
+                lines.append(ui_manager.create_progress_bar(t.progress))
                 if t.speed_bytes_per_sec and t.speed_bytes_per_sec > 0:
-                    lines.append(f"🚀 {format_file_size(t.speed_bytes_per_sec)}/s")
+                    lines.append(f"{format_file_size(t.speed_bytes_per_sec)}/s")
                 if stage_started_at and t.progress > 0.05:
                     elapsed = time.time() - stage_started_at
                     remaining = (elapsed / t.progress) - elapsed
-                    lines.append(f"⏱️ {i18n.get(chat_id, 'status_time_left', time=manager._format_time(remaining, chat_id)) if remaining > 0 else i18n.get(chat_id, 'status_finishing')}")
+                    lines.append(i18n.get(chat_id, 'status_time_left', time=manager._format_time(remaining, chat_id)) if remaining > 0 else i18n.get(chat_id, 'status_finishing'))
                 else:
-                    lines.append(f"⏱️ {i18n.get(chat_id, 'status_calc')}")
+                    lines.append(i18n.get(chat_id, 'status_calc'))
             else:
-                lines.append(f"⏳ {i18n.get(chat_id, 'status_queue')}")
+                lines.append(f"⏳ <b>{title}</b>")
+                lines.append(i18n.get(chat_id, 'status_queue'))
             lines.append("")
         kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads")]])
         await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)

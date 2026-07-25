@@ -1,4 +1,5 @@
 from ..utils.i18n import i18n
+import html
 import logging
 import queue
 import threading
@@ -165,23 +166,24 @@ class DownloadManager:
 
                             speed = task.speed_bytes_per_sec
                             speed_line = (
-                                f"🚀 {format_file_size(speed)}/s"
+                                f"{format_file_size(speed)}/s"
                                 if speed and speed > 0
                                 else ""
                             )
 
-                            title = (
+                            fallback_title = (
                                 i18n.get(task.chat_id, "status_uploading_title")
                                 if is_upload
                                 else i18n.get(task.chat_id, "status_downloading")
                             )
+                            title = html.escape(task.info.get("title") or fallback_title)
                             stage_icon = "⬆️" if is_upload else "⬇️"
 
-                            lines = [f"{stage_icon} {progress_bar}"]
+                            lines = [progress_bar]
                             if speed_line:
                                 lines.append(speed_line)
                             lines.append(
-                                f"⏱️ {remaining_str}" if remaining_str else f"⏱️ {i18n.get(task.chat_id, 'status_time_calculating')}"
+                                remaining_str if remaining_str else i18n.get(task.chat_id, 'status_time_calculating')
                             )
                             if not is_upload:
                                 lines.append("")
@@ -191,10 +193,11 @@ class DownloadManager:
                                 ui_manager.format_panel(
                                     title,
                                     lines,
-                                    icon="📦",
+                                    icon=stage_icon,
                                 ),
                                 task.chat_id,
                                 task.message_id,
+                                parse_mode="HTML",
                             )
                     except Exception as exc:
                         logger.debug("Ошибка при обновлении статуса задачи %s: %s", task_id, exc)
@@ -203,11 +206,6 @@ class DownloadManager:
                 logger.error("Ошибка в потоке обновления статуса: %s", exc)
 
             time.sleep(2)
-
-    @staticmethod
-    def _generate_progress_bar(progress, length=10):
-        filled = int(progress * length)
-        return f"{'▓' * filled}{'░' * (length - filled)}"
 
     @staticmethod
     def _format_time(seconds, chat_id=0):

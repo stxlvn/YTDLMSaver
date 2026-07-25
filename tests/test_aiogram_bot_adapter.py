@@ -13,60 +13,32 @@ def _adapter(*, is_local: bool) -> AiogramSyncBotAdapter:
     return AiogramSyncBotAdapter(bot=bot, loop=None)
 
 
-def test_local_api_uses_file_uri(tmp_path):
+def test_local_api_always_streams_file(tmp_path):
+    # Наш telegram-bot-api - отдельный Docker-контейнер с расшаренным только
+    # /tmp; file:// URI на путь вне /tmp (например /root/ReSave/temp_downloads)
+    # ловит "invalid file HTTP URL specified: Unsupported URL protocol", потому
+    # что внутри контейнера такого пути просто не существует. Поэтому и на
+    # локальном Bot API файл всегда стримится через HTTP, как на облачном.
     media_path = tmp_path / "video with spaces.mp4"
     media_path.write_bytes(b"media")
 
-    prepared = _adapter(is_local=True)._prepare_file(
-        media_path,
-        local_upload=True,
-    )
+    prepared = _adapter(is_local=True)._prepare_file(media_path)
 
-    assert prepared == media_path.resolve().as_uri()
-    assert prepared.startswith("file:///")
+    assert isinstance(prepared, FSInputFile)
+    assert Path(prepared.path) == media_path
 
 
 def test_cloud_api_uses_streaming_upload(tmp_path):
     media_path = tmp_path / "video.mp4"
     media_path.write_bytes(b"media")
 
-    prepared = _adapter(is_local=False)._prepare_file(
-        media_path,
-        local_upload=True,
-    )
+    prepared = _adapter(is_local=False)._prepare_file(media_path)
 
     assert isinstance(prepared, FSInputFile)
     assert Path(prepared.path) == media_path
 
 
-def test_cloud_fallback_never_receives_file_uri(tmp_path):
-    media_path = tmp_path / "video.mp4"
-    media_path.write_bytes(b"media")
-    adapter = _adapter(is_local=True)
-
-    prepared = adapter._prepare_file(media_path)
-
-    assert isinstance(prepared, FSInputFile)
-
-
-def test_local_api_with_progress_still_prefers_file_uri(tmp_path):
-    # На локальном Bot API file:// URI обходит наш стриминг целиком - и это
-    # нормально: реальный медленный аплоад на серверы Telegram происходит уже
-    # внутри telegram-bot-api и никогда не был виден нашему коду, даже когда
-    # мы стримили байты через ProgressTrackingFSInputFile по loopback.
-    media_path = tmp_path / "video.mp4"
-    media_path.write_bytes(b"media")
-
-    prepared = _adapter(is_local=True)._prepare_file(
-        media_path,
-        on_progress=lambda sent, total: None,
-        local_upload=True,
-    )
-
-    assert prepared == media_path.resolve().as_uri()
-
-
-def test_progress_tracking_used_without_local_upload(tmp_path):
+def test_progress_tracking_used_when_on_progress_given(tmp_path):
     media_path = tmp_path / "video.mp4"
     media_path.write_bytes(b"media")
     seen = []
