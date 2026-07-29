@@ -7,6 +7,22 @@ from .user_stats import get_stats_manager
 
 logger = logging.getLogger(__name__)
 
+
+class UserFacingError(Exception):
+    """Raised with an already-localized, ready-to-show message.
+
+    handle_download_task must send str(exc) to the user as-is instead of
+    running it through ErrorMessages.get_user_message: that classifier matches
+    English keywords ("private", "blocked", ...) against the error text, but
+    messages raised here are already translated - a Russian message contains
+    none of those keywords and falls through to a generic "unknown error",
+    while the English text can accidentally match an unrelated keyword (e.g.
+    "the post is deleted, private, or cookies need updating" matches "private"
+    and gets reported as "this video is private", even when the real cause was
+    gallery-dl timing out against Instagram).
+    """
+
+
 def strip_ansi(text):
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     return ansi_escape.sub('', str(text))
