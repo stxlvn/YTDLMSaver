@@ -24,6 +24,7 @@ from .download_support import (
     record_failed_download,
 )
 from .file_sender import send_file_with_retry
+from .video_info import run_ydl_with_geo_fallback
 from .media_assets import (
     convert_to_gif_and_send,
     download_and_send_subtitles,
@@ -124,15 +125,14 @@ def _get_format_size(url, action, format_param=None):
             "format": fmt,
             **config.geo_ydl_opts(),
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            total_size = 0
-            if "requested_formats" in info:
-                for f in info["requested_formats"]:
-                    total_size += f.get("filesize", 0) or f.get("filesize_approx", 0)
-            else:
-                total_size = info.get("filesize", 0) or info.get("filesize_approx", 0)
-            return total_size if total_size > 0 else None
+        info = run_ydl_with_geo_fallback(ydl_opts, lambda ydl: ydl.extract_info(url, download=False))
+        total_size = 0
+        if "requested_formats" in info:
+            for f in info["requested_formats"]:
+                total_size += f.get("filesize", 0) or f.get("filesize_approx", 0)
+        else:
+            total_size = info.get("filesize", 0) or info.get("filesize_approx", 0)
+        return total_size if total_size > 0 else None
     except Exception as e:
         logger.debug(f"Не удалось определить размер для {action}: {e}")
         return None
@@ -149,8 +149,7 @@ def get_available_actions_optimized(url):
         **config.geo_ydl_opts(),
     }
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = run_ydl_with_geo_fallback(ydl_opts, lambda ydl: ydl.extract_info(url, download=False))
         formats = info.get("formats", [])
         if not formats:
             return default_actions, info
@@ -290,8 +289,7 @@ def _download_with_timeout(url: str, ydl_params: dict, timeout_seconds: int, tas
     params = dict(ydl_params)
     params["progress_hooks"] = [progress_hook]
 
-    with yt_dlp.YoutubeDL(params) as ydl:
-        ydl.download([url])
+    run_ydl_with_geo_fallback(params, lambda ydl: ydl.download([url]))
 
     task.progress = 1.0
 

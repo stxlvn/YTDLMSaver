@@ -8,6 +8,21 @@ logger = logging.getLogger(__name__)
 cookie_path = config.COOKIES_FILE
 
 
+def run_ydl_with_geo_fallback(ydl_opts: dict, action):
+    """Run `action(ydl)`; on an apparent region block, retry once through
+    config.PROXY_URL (if configured) instead of just failing outright."""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return action(ydl)
+    except Exception as exc:
+        if not config.PROXY_URL or not config.is_geo_blocked_error(str(exc)):
+            raise
+        logger.info("Похоже на региональную блокировку (%s), пробую через прокси", exc)
+        proxied_opts = {**ydl_opts, **config.proxy_ydl_opts()}
+        with yt_dlp.YoutubeDL(proxied_opts) as ydl:
+            return action(ydl)
+
+
 def fetch_video_info_result(url):
     try:
         ydl_opts = {
@@ -24,9 +39,8 @@ def fetch_video_info_result(url):
             **config.geo_ydl_opts(),
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return info, None
+        info = run_ydl_with_geo_fallback(ydl_opts, lambda ydl: ydl.extract_info(url, download=False))
+        return info, None
 
     except Exception as e:
         logger.info("Ссылка не поддерживается или недоступна: %s", e)

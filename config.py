@@ -89,6 +89,7 @@ class Settings:
     download_stall_timeout_seconds: int
     download_rate_limit_bytes: int
     geo_bypass_country: str
+    proxy_url: str
 
 
 def build_settings() -> Settings:
@@ -126,6 +127,7 @@ def build_settings() -> Settings:
             minimum=0,
         ),
         geo_bypass_country=_get_str("GEO_BYPASS_COUNTRY", "").upper(),
+        proxy_url=_get_str("PROXY_URL", ""),
     )
 
 
@@ -165,6 +167,7 @@ DOWNLOAD_TIMEOUT_SECONDS = SETTINGS.download_timeout_seconds
 DOWNLOAD_STALL_TIMEOUT_SECONDS = SETTINGS.download_stall_timeout_seconds
 DOWNLOAD_RATE_LIMIT_BYTES = SETTINGS.download_rate_limit_bytes
 GEO_BYPASS_COUNTRY = SETTINGS.geo_bypass_country
+PROXY_URL = SETTINGS.proxy_url
 
 # Конфиг для повторных попыток отправки
 UPLOAD_RETRY_CONFIG = {
@@ -183,3 +186,29 @@ def geo_ydl_opts() -> dict:
     if GEO_BYPASS_COUNTRY:
         opts["geo_bypass_country"] = GEO_BYPASS_COUNTRY
     return opts
+
+
+def proxy_ydl_opts() -> dict:
+    """yt-dlp options routing the request through PROXY_URL, if configured."""
+    return {"proxy": PROXY_URL} if PROXY_URL else {}
+
+
+# "video unavailable" is intentionally included even though it also covers
+# deleted/private videos: yt-dlp doesn't always say "your country" for a real
+# geo-block, and retrying once through the proxy costs a few seconds but
+# correctly recovers the actually-region-locked cases mixed in with it.
+GEO_BLOCK_MARKERS = (
+    "not available in your country",
+    "not available from your location",
+    "blocked it in your country",
+    "geo restrict",
+    "content isn't available",
+    "content is not available",
+    "this video is not available",
+    "video unavailable",
+)
+
+
+def is_geo_blocked_error(error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    return any(marker in lowered for marker in GEO_BLOCK_MARKERS)
