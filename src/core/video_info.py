@@ -21,6 +21,7 @@ def fetch_video_info_result(url):
             "cookiefile": cookie_path,
             "nocheckcertificate": True,
             "ignore_no_formats_error": True,
+            **config.geo_ydl_opts(),
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -50,6 +51,7 @@ def check_subtitles_available(url):
             "cookiefile": cookie_path,
             "nocheckcertificate": True,
             "ignore_no_formats_error": True,
+            **config.geo_ydl_opts(),
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

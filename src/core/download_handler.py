@@ -122,6 +122,7 @@ def _get_format_size(url, action, format_param=None):
             "no_warnings": True,
             "extract_flat": False,
             "format": fmt,
+            **config.geo_ydl_opts(),
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -145,6 +146,7 @@ def get_available_actions_optimized(url):
         "no_warnings": True,
         "cookiefile": config.COOKIES_FILE,
         "extractor_args": {"youtube": ["player-client=mweb,default"]},
+        **config.geo_ydl_opts(),
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -323,6 +325,7 @@ def _base_ydl_params(variant: "DownloadVariant") -> dict:
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
         },
         "extractor_args": {"youtube": ["player-client=mweb,default"]},
+        **config.geo_ydl_opts(),
     }
 
     if variant.postprocessors:
