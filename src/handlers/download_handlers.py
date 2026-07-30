@@ -36,7 +36,10 @@ def get_markup_builder(chat_id):
         if url:
             try:
                 from src.core.download_handler import get_available_actions_optimized
-                available_actions, info = get_available_actions_optimized(url)
+                optimized_actions, optimized_info = get_available_actions_optimized(url)
+                available_actions = optimized_actions
+                if optimized_info:
+                    info = optimized_info
             except Exception: pass
 
         formats = info.get("formats", []) if info else []
