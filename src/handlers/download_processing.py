@@ -161,6 +161,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
             "extractor_retries": 2,
             "cookiefile": config.COOKIES_FILE,
             "nocheckcertificate": True,
+            **config.geo_ydl_opts(),
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

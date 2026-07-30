@@ -88,6 +88,7 @@ class Settings:
     download_timeout_seconds: int
     download_stall_timeout_seconds: int
     download_rate_limit_bytes: int
+    geo_bypass_country: str
 
 
 def build_settings() -> Settings:
@@ -124,6 +125,7 @@ def build_settings() -> Settings:
             4 * 1024 * 1024,
             minimum=0,
         ),
+        geo_bypass_country=_get_str("GEO_BYPASS_COUNTRY", "").upper(),
     )
 
 
@@ -162,6 +164,7 @@ LOG_LEVEL = SETTINGS.log_level
 DOWNLOAD_TIMEOUT_SECONDS = SETTINGS.download_timeout_seconds
 DOWNLOAD_STALL_TIMEOUT_SECONDS = SETTINGS.download_stall_timeout_seconds
 DOWNLOAD_RATE_LIMIT_BYTES = SETTINGS.download_rate_limit_bytes
+GEO_BYPASS_COUNTRY = SETTINGS.geo_bypass_country
 
 # Конфиг для повторных попыток отправки
 UPLOAD_RETRY_CONFIG = {
@@ -172,3 +175,11 @@ UPLOAD_RETRY_CONFIG = {
     "jitter": 1,
 }
 UPLOAD_TIMEOUT = 300
+
+
+def geo_ydl_opts() -> dict:
+    """yt-dlp options to spoof the region for geo-restricted videos, if configured."""
+    opts: dict = {"geo_bypass": True}
+    if GEO_BYPASS_COUNTRY:
+        opts["geo_bypass_country"] = GEO_BYPASS_COUNTRY
+    return opts
