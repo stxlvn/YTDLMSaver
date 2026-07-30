@@ -150,7 +150,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
             )
             return
 
-        import yt_dlp
+        from ..core.video_info import run_ydl_with_geo_fallback
 
         ydl_opts = {
             "quiet": True,
@@ -164,8 +164,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
             **config.geo_ydl_opts(),
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = run_ydl_with_geo_fallback(ydl_opts, lambda ydl: ydl.extract_info(url, download=False))
 
         if not info:
             logger.warning("Не удалось получить информацию для %s в группе %s", url, chat_id)
