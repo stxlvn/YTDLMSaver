@@ -161,7 +161,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
             "extractor_retries": 2,
             "nocheckcertificate": True,
             **config.cookie_ydl_opts(),
-            **config.youtube_ydl_opts(),
+            **config.common_ydl_opts(),
             **config.geo_ydl_opts(),
         }
 

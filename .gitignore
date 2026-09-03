@@ -10,6 +10,8 @@ __pycache__/
 temp_downloads/
 bot.log
 cookies.txt
+yt_cookies.txt
+state.json
 .ytdlmsaver.lock
 .run_alwaysdata_local_bot_api.lock/
 .telegram-bot-api/

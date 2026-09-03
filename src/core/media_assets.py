@@ -213,7 +213,7 @@ def download_and_send_subtitles(task, bot, temp_dir):
             "http_chunk_size": 10485760,
             "socket_timeout": 30,
             **config.cookie_ydl_opts(),
-            **config.youtube_ydl_opts(),
+            **config.common_ydl_opts(),
         }
 
         ffmpeg_location = _ffmpeg_location()

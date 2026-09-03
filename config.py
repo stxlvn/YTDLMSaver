@@ -82,6 +82,7 @@ class Settings:
     bot_api_is_local: bool
     bot_api_upload_limit: int
     cookies_file: str
+    yt_cookies_file: str
     stats_db_path: str
     admin_ids: tuple[int, ...]
     log_level: str
@@ -95,6 +96,7 @@ class Settings:
 def build_settings() -> Settings:
     temp_dir = _resolve_path(_get_str("TEMP_DIR", "temp_downloads"))
     cookies_file = _resolve_path(_get_str("COOKIES_FILE", str(BASE_DIR / "cookies.txt")))
+    yt_cookies_file = _resolve_path(_get_str("YT_COOKIES_FILE", str(BASE_DIR / "yt_cookies.txt")))
     stats_db_path = _resolve_path(_get_str("STATS_DB_PATH", _get_str("DB_NAME", "database.db")))
     bot_api_base_url = _get_str("BOT_API_BASE_URL")
     bot_api_is_local = _get_bool("BOT_API_IS_LOCAL", bool(bot_api_base_url))
@@ -112,6 +114,7 @@ def build_settings() -> Settings:
         bot_api_is_local=bot_api_is_local,
         bot_api_upload_limit=bot_api_upload_limit,
         cookies_file=cookies_file,
+        yt_cookies_file=yt_cookies_file,
         stats_db_path=stats_db_path,
         admin_ids=_get_id_list("ADMIN_IDS"),
         log_level=_get_str("LOG_LEVEL", "INFO").upper() or "INFO",
@@ -159,6 +162,7 @@ BOT_API_BASE_URL = SETTINGS.bot_api_base_url
 BOT_API_IS_LOCAL = SETTINGS.bot_api_is_local
 BOT_API_UPLOAD_LIMIT = SETTINGS.bot_api_upload_limit
 COOKIES_FILE = SETTINGS.cookies_file
+YT_COOKIES_FILE = SETTINGS.yt_cookies_file
 DB_NAME = SETTINGS.stats_db_path
 STATS_DB_PATH = SETTINGS.stats_db_path
 ADMIN_IDS = SETTINGS.admin_ids
@@ -180,13 +184,8 @@ UPLOAD_RETRY_CONFIG = {
 UPLOAD_TIMEOUT = 300
 
 
-def cookie_ydl_opts() -> dict:
-    """Pass cookiefile to yt-dlp only when cookies.txt exists and is non-empty.
-
-    YouTube runs cookie-free (PO tokens via bgutil provider); Instagram/other
-    authenticated sources still pick up cookies.txt when it is present.
-    """
-    path = Path(COOKIES_FILE)
+def _cookiefile_opts(path_str: str) -> dict:
+    path = Path(path_str)
     try:
         if path.is_file() and path.stat().st_size > 0:
             return {"cookiefile": str(path)}
@@ -195,15 +194,64 @@ def cookie_ydl_opts() -> dict:
     return {}
 
 
-def youtube_ydl_opts() -> dict:
-    """POT-friendly YouTube client selection.
+def cookie_ydl_opts() -> dict:
+    """Pass cookies.txt to yt-dlp only when it exists and is non-empty.
 
-    The bgutil PO-token provider supplies the tokens the ``tv`` / ``web_safari``
-    clients need, so no account cookies are required. The forced ``mweb`` client
-    used previously needed its own cookies + PO token (and the option key was
-    misspelled ``player-client``, so yt-dlp ignored it anyway).
+    YouTube runs cookie-free (PO tokens via bgutil provider); Instagram/other
+    authenticated sources still pick up cookies.txt when it is present.
     """
-    return {"extractor_args": {"youtube": ["player_client=default,tv,web_safari"]}}
+    return _cookiefile_opts(COOKIES_FILE)
+
+
+def yt_cookie_ydl_opts() -> dict:
+    """Cookies for the age-restricted-YouTube fallback only.
+
+    Populate ``yt_cookies.txt`` (env ``YT_COOKIES_FILE``) with a throwaway,
+    age-verified Google account exported from a browser. It is used ONLY when a
+    normal (cookie-free) attempt fails with an age-gate — never on the main
+    path — so the throwaway account sees almost no traffic and rarely locks.
+    """
+    return _cookiefile_opts(YT_COOKIES_FILE)
+
+
+def has_yt_cookies() -> bool:
+    return bool(yt_cookie_ydl_opts())
+
+
+def common_ydl_opts() -> dict:
+    """yt-dlp knobs we want on every call.
+
+    - ``source_address``: force IPv4. VPS/shared hosts often advertise IPv6 with
+      an unstable route, which yt-dlp surfaces as spurious HTTP 403s.
+    - YouTube client selection: the bgutil PO-token provider supplies the tokens
+      the ``tv`` / ``web_safari`` clients need, so no account cookies are
+      required. ``tv_embedded`` / ``web_embedded`` are kept in the list because
+      they still serve a few otherwise-restricted videos; true age-gated ones
+      need the yt_cookies.txt fallback. The forced ``mweb`` client used before
+      needed its own cookies + PO token (and the option key was misspelled
+      ``player-client``, so yt-dlp ignored it anyway).
+    """
+    return {
+        "source_address": "0.0.0.0",
+        "extractor_args": {
+            "youtube": ["player_client=default,tv,tv_embedded,web_embedded,web_safari"]
+        },
+    }
+
+
+AGE_RESTRICTION_MARKERS = (
+    "sign in to confirm your age",
+    "confirm your age",
+    "age-restricted",
+    "age restricted",
+    "inappropriate for some users",
+    "this video may be inappropriate",
+)
+
+
+def is_age_restricted_error(error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    return any(marker in lowered for marker in AGE_RESTRICTION_MARKERS)
 
 
 def geo_ydl_opts() -> dict:

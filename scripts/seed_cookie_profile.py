@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Разовый (или "когда снова слетит") засев headless-профиля Playwright из
-уже валидного cookies.txt — без видимого браузера и без VNC/X11.
+"""Засев headless-профилей Playwright из уже валидных cookies-файлов —
+без видимого браузера и без VNC/X11.
 
-Экран нужен только для РУЧНОГО логина (scripts/login_cookie_profile.py).
-Обычно же пользователь экспортирует cookies.txt расширением браузера,
-кладёт в ~/Downloads (deploy_cookies.sh подхватывает), а этим скриптом
-Instagram-cookies переносятся в headless-профиль, который потом
-поддерживает живым scripts/refresh_cookies.py.
+Разбирает:
 
-Запускать заново, когда refresh_cookies.py начал ругаться на "сессия
-слетела" и пришло уведомление в Telegram.
+* ``config.COOKIES_FILE`` (cookies.txt) — берёт Instagram-cookies и кладёт
+  их в основной профиль;
+* ``config.YT_COOKIES_FILE`` (yt_cookies.txt), если существует — берёт
+  Google/YouTube-cookies и кладёт в профиль ``<...>-yt`` (нужен только для
+  возрастных видео).
+
+Профиль(и) потом поддерживает живым ``scripts/refresh_cookies.py``.
+Запускать, когда refresh_cookies.py начал ругаться на "сессия слетела" и
+пришло уведомление в Telegram: пользователь заново экспортирует нужный
+cookies-файл (расширение браузера → ~/Downloads → deploy_cookies.sh), а
+этот скрипт переносит его в профиль.
 """
 from __future__ import annotations
 
@@ -25,14 +30,22 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import config  # noqa: E402
 
-PROFILE_DIR = Path(
+_BASE_PROFILE = Path(
     os.environ.get("COOKIE_PROFILE_DIR", Path.home() / ".cache/ytdlmsaver-cookie-profile")
 ).expanduser()
-COOKIES_FILE = Path(config.COOKIES_FILE)
-MANAGED_MARKER = "instagram.com"
+
+_JOBS = [
+    ("instagram", Path(config.COOKIES_FILE), _BASE_PROFILE, ("instagram.com",)),
+    (
+        "youtube",
+        Path(config.YT_COOKIES_FILE),
+        _BASE_PROFILE.with_name(_BASE_PROFILE.name + "-yt"),
+        ("youtube.com", "google.com", "google.ru"),
+    ),
+]
 
 
-def _parse_netscape_cookies(path: Path) -> list[dict]:
+def _parse_netscape_cookies(path: Path, markers: tuple[str, ...]) -> list[dict]:
     cookies = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip() or line.startswith("#"):
@@ -40,10 +53,9 @@ def _parse_netscape_cookies(path: Path) -> list[dict]:
         parts = line.split("\t")
         if len(parts) != 7:
             continue
-        domain, _include_subdomains, cpath, secure, expiry, name, value = parts
-        if MANAGED_MARKER not in domain:
+        domain, _inc, cpath, secure, expiry, name, value = parts
+        if not any(m in domain for m in markers):
             continue
-        expiry_int = int(expiry) if expiry.isdigit() else 0
         cookie = {
             "name": name,
             "value": value,
@@ -52,33 +64,39 @@ def _parse_netscape_cookies(path: Path) -> list[dict]:
             "secure": secure.upper() == "TRUE",
             "sameSite": "Lax",
         }
-        if expiry_int > 0:
-            cookie["expires"] = expiry_int
+        if expiry.isdigit() and int(expiry) > 0:
+            cookie["expires"] = int(expiry)
         cookies.append(cookie)
     return cookies
 
 
-def main() -> int:
-    if not COOKIES_FILE.exists():
-        print(f"{COOKIES_FILE} не найден", file=sys.stderr)
-        return 1
-
-    cookies = _parse_netscape_cookies(COOKIES_FILE)
+def _seed(name: str, cookies_file: Path, profile_dir: Path, markers: tuple[str, ...]) -> bool:
+    if not cookies_file.is_file() or cookies_file.stat().st_size == 0:
+        return False
+    cookies = _parse_netscape_cookies(cookies_file, markers)
     if not cookies:
-        print("Не нашёл ни одной Instagram-cookie в cookies.txt", file=sys.stderr)
-        return 1
-
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-
+        print(f"{name}: в {cookies_file.name} нет подходящих cookies — пропускаю")
+        return False
+    profile_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         context = p.firefox.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=True,
+            user_data_dir=str(profile_dir), headless=True
         )
         context.add_cookies(cookies)
         context.close()
+    print(f"{name}: засеяно {len(cookies)} cookies в {profile_dir}")
+    return True
 
-    print(f"Засеяно {len(cookies)} Instagram-cookies в {PROFILE_DIR}")
+
+def main() -> int:
+    seeded = [
+        name
+        for name, cookies_file, profile_dir, markers in _JOBS
+        if _seed(name, cookies_file, profile_dir, markers)
+    ]
+    if not seeded:
+        print("Нечего засевать: ни один cookies-файл не содержит нужных cookies", file=sys.stderr)
+        return 1
     return 0
 
 
