@@ -123,6 +123,8 @@ def _get_format_size(url, action, format_param=None):
             "no_warnings": True,
             "extract_flat": False,
             "format": fmt,
+            **config.cookie_ydl_opts(),
+            **config.youtube_ydl_opts(),
             **config.geo_ydl_opts(),
         }
         info = run_ydl_with_geo_fallback(ydl_opts, lambda ydl: ydl.extract_info(url, download=False))
@@ -144,8 +146,8 @@ def get_available_actions_optimized(url):
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "cookiefile": config.COOKIES_FILE,
-        "extractor_args": {"youtube": ["player-client=mweb,default"]},
+        **config.cookie_ydl_opts(),
+        **config.youtube_ydl_opts(),
         **config.geo_ydl_opts(),
     }
     try:
@@ -316,13 +318,13 @@ def _base_ydl_params(variant: "DownloadVariant") -> dict:
         "continuedl": True,
         "overwrites": True,
         "trim_file_name": 180,
-        "cookiefile": config.COOKIES_FILE,
         "nocheckcertificate": True,
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
         },
-        "extractor_args": {"youtube": ["player-client=mweb,default"]},
+        **config.cookie_ydl_opts(),
+        **config.youtube_ydl_opts(),
         **config.geo_ydl_opts(),
     }
 
