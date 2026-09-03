@@ -10,7 +10,6 @@ from pathlib import Path
 import requests
 import yt_dlp
 from aiogram.types import BufferedInputFile, InputMediaPhoto
-from PIL import Image
 
 import config
 from ..utils.file_utils import sanitize_filename
@@ -213,7 +212,8 @@ def download_and_send_subtitles(task, bot, temp_dir):
             "no_warnings": True,
             "http_chunk_size": 10485760,
             "socket_timeout": 30,
-            "cookiefile": config.COOKIES_FILE,
+            **config.cookie_ydl_opts(),
+            **config.common_ydl_opts(),
         }
 
         ffmpeg_location = _ffmpeg_location()
@@ -410,13 +410,6 @@ def download_and_send_thumbnail(task, bot, temp_dir):
         file_size_error = build_file_size_limit_error(file_size)
         if file_size_error:
             raise RuntimeError(file_size_error)
-
-        try:
-            with Image.open(file_path) as image:
-                width, height = image.size
-            _ = f"{width}x{height}"
-        except Exception:
-            pass
 
         size_str = format_file_size(file_size)
         if not task.silent_mode:

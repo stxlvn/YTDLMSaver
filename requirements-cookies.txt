@@ -1,0 +1,5 @@
+# Playwright — только для Instagram keep-alive (scripts/*cookie*).
+# Не нужен для работы самого бота, ставится отдельно:
+#   ./venv/bin/pip install -r requirements-cookies.txt
+#   ./venv/bin/playwright install firefox
+playwright==1.62.0
