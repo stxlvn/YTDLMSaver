@@ -7,18 +7,32 @@ logger = logging.getLogger(__name__)
 
 
 def run_ydl_with_geo_fallback(ydl_opts: dict, action):
-    """Run `action(ydl)`; on an apparent region block, retry once through
-    config.PROXY_URL (if configured) instead of just failing outright."""
+    """Run ``action(ydl)`` and, if it fails in a recoverable way, retry once:
+
+    - apparent region block -> retry through ``config.PROXY_URL`` (if set);
+    - YouTube age-gate -> retry with ``yt_cookies.txt`` (if present). This is
+      the only place account cookies touch YouTube; the main path stays
+      cookie-free.
+    """
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return action(ydl)
     except Exception as exc:
-        if not config.PROXY_URL or not config.is_geo_blocked_error(str(exc)):
-            raise
-        logger.info("Похоже на региональную блокировку (%s), пробую через прокси", exc)
-        proxied_opts = {**ydl_opts, **config.proxy_ydl_opts()}
-        with yt_dlp.YoutubeDL(proxied_opts) as ydl:
-            return action(ydl)
+        text = str(exc)
+
+        if config.is_age_restricted_error(text) and config.has_yt_cookies():
+            logger.info("Возрастное ограничение (%s), пробую с yt_cookies.txt", exc)
+            aged_opts = {**ydl_opts, **config.yt_cookie_ydl_opts()}
+            with yt_dlp.YoutubeDL(aged_opts) as ydl:
+                return action(ydl)
+
+        if config.PROXY_URL and config.is_geo_blocked_error(text):
+            logger.info("Похоже на региональную блокировку (%s), пробую через прокси", exc)
+            proxied_opts = {**ydl_opts, **config.proxy_ydl_opts()}
+            with yt_dlp.YoutubeDL(proxied_opts) as ydl:
+                return action(ydl)
+
+        raise
 
 
 def fetch_video_info_result(url):
@@ -34,7 +48,7 @@ def fetch_video_info_result(url):
             "nocheckcertificate": True,
             "ignore_no_formats_error": True,
             **config.cookie_ydl_opts(),
-            **config.youtube_ydl_opts(),
+            **config.common_ydl_opts(),
             **config.geo_ydl_opts(),
         }
 
@@ -64,7 +78,7 @@ def check_subtitles_available(url):
             "nocheckcertificate": True,
             "ignore_no_formats_error": True,
             **config.cookie_ydl_opts(),
-            **config.youtube_ydl_opts(),
+            **config.common_ydl_opts(),
             **config.geo_ydl_opts(),
         }
 

@@ -35,7 +35,7 @@ def prepare_video_thumbnail(task, work_dir, file_path) -> str | None:
                 'quiet': True,
                 'no_warnings': True,
                 **config.cookie_ydl_opts(),
-                **config.youtube_ydl_opts(),
+                **config.common_ydl_opts(),
             }) as ydl:
                 info = ydl.extract_info(task.url, download=False)
                 thumbnail_url = info.get('thumbnail')

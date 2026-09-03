@@ -149,9 +149,46 @@ bash -c 'export BOT_API_BIN=$HOME/telegram-bot-api/bin/telegram-bot-api && bash 
 
 Скрипт поднимает Bot API на `127.0.0.1:8081`, поэтому он доступен только боту внутри этого же Service-процесса. Это безопаснее, чем открывать порт сервиса наружу.
 
-### Cookies для `yt-dlp` (опционально)
+### Cookies и обход блокировок
 
-Если нужны авторизованные источники, добавьте cookies в `cookies.txt`.
+**YouTube — cookies не нужны.** Токены Proof-of-Origin (PO tokens), которыми
+YouTube защищается от «Sign in to confirm you're not a bot», выдаёт локальный
+провайдер `bgutil-ytdlp-pot-provider`. Он ставится вместе с зависимостями
+(`pip install -r requirements.txt`) и поднимается как отдельный сервис:
+
+```bash
+git clone https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git ~/bgutil-ytdlp-pot-provider
+cd ~/bgutil-ytdlp-pot-provider/server && npm ci && npx tsc
+node build/main.js -p 4416   # проверка вручную; в проде — systemd-юнит bgutil-pot.service
+```
+
+yt-dlp находит провайдер на `http://127.0.0.1:4416` автоматически.
+
+**Instagram — нужен залогиненный аккаунт.** Instagram почти ничего не отдаёт
+без входа. Экспортируйте cookies браузерным расширением («Get cookies.txt»)
+в файл `cookies.txt` рядом с `main.py`. Дальше сессию продлевает
+`scripts/refresh_cookies.py` (cron, раз в 6 ч, headless-Firefox через
+Playwright). 100%-й автоматики для Instagram не существует — примерно раз в
+месяц сессия слетает и бот присылает админу уведомление: нужно заново
+экспортировать `cookies.txt` в `~/Downloads` (≈2 минуты), остальное
+автоматически.
+
+Установка Playwright для keep-alive:
+
+```bash
+./venv/bin/pip install -r requirements-cookies.txt
+./venv/bin/playwright install firefox
+./venv/bin/python scripts/seed_cookie_profile.py   # засеять профиль из cookies.txt
+```
+
+**Возрастные видео YouTube (18+) — отдельный опциональный файл.** Обойти
+age-gate без входа в аккаунт больше нельзя. Заведите одноразовый Google-аккаунт,
+подтвердите в нём возраст, экспортируйте его cookies в `yt_cookies.txt` (env
+`YT_COOKIES_FILE`). Этот файл используется **только** как повторная попытка,
+когда обычная (без cookies) упёрлась в age-gate — на основной путь YouTube он
+не влияет. `refresh_cookies.py` продлевает и эту сессию (отдельный профиль,
+отдельное уведомление). Без `yt_cookies.txt` возрастные видео просто отдают
+понятную ошибку, всё остальное работает.
 
 ### Запуск
 
@@ -182,17 +219,20 @@ python main.py
 - `src/` - основная логика приложения.
 - `tests/` - автоматические тесты.
 - `temp_downloads/` - временные загруженные файлы.
-- `cookies.txt` - cookies для `yt-dlp`.
+- `cookies.txt` - cookies Instagram (для gallery-dl и yt-dlp).
+- `yt_cookies.txt` - опционально, cookies одноразового Google-аккаунта для видео 18+.
+- `scripts/refresh_cookies.py` - keep-alive сессий (cron).
 - `database.db` - SQLite-база со статистикой.
 - `bot.log` - локальные логи.
 
 ## Проверка проекта
 
 ```bash
-python -m unittest discover -s tests -v
+python -m pytest tests/ -q
 ```
 
-В репозитории также настроен GitHub Actions workflow `CI`, который компилирует исходники и запускает тесты на каждый push и pull request.
+В репозитории настроен GitHub Actions workflow `CI` (`.github/workflows/ci.yml`):
+компиляция исходников, `pytest` и `pip-audit` на каждый push и pull request.
 
 ## Запуск как systemd-сервис (Linux)
 
