@@ -67,6 +67,14 @@ class ErrorMessages:
     BLOCKED_VIDEO = "❌ Это видео заблокировано в вашей стране или недоступно."
     RESTRICTED_VIDEO = "❌ Это видео ограничено в доступе. Требуется авторизация."
     REMOVED_VIDEO = "❌ Это видео было удалено или больше недоступно."
+    AGE_RESTRICTED_VIDEO = (
+        "🔞 Это видео с возрастным ограничением — для него нужен вход в аккаунт, "
+        "поэтому бот его скачать не может. Другие видео работают как обычно."
+    )
+    SOURCE_FORBIDDEN = (
+        "🚫 Источник отклонил загрузку (403). Ссылка временно защищена — "
+        "попробуйте позже."
+    )
     
     # Ошибки со скачиванием
     DOWNLOAD_FAILED = "❌ Не удалось скачать видео. Попробуйте позже."
@@ -115,6 +123,14 @@ class ErrorMessages:
         error_lower = error_str.lower()
         
         checks = [
+            ("sign in to confirm your age", ErrorMessages.AGE_RESTRICTED_VIDEO),
+            ("age-restricted", ErrorMessages.AGE_RESTRICTED_VIDEO),
+            ("age restricted", ErrorMessages.AGE_RESTRICTED_VIDEO),
+            ("inappropriate for some users", ErrorMessages.AGE_RESTRICTED_VIDEO),
+            ("confirm you're not a bot", ErrorMessages.SOURCE_FORBIDDEN),
+            ("sign in to confirm", ErrorMessages.SOURCE_FORBIDDEN),
+            ("http error 403", ErrorMessages.SOURCE_FORBIDDEN),
+            ("forbidden", ErrorMessages.SOURCE_FORBIDDEN),
             ("unavailable", ErrorMessages.UNAVAILABLE_VIDEO),
             ("private", ErrorMessages.PRIVATE_VIDEO),
             ("blocked", ErrorMessages.BLOCKED_VIDEO),

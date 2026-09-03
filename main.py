@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -117,6 +118,46 @@ async def notify_admins_async(bot, text: str):
             logger.error("Не удалось уведомить администратора %s: %s", admin_id, exc)
 
 
+def check_instagram_cookies(cookies_file: str, max_age_days: int = 25) -> str | None:
+    """Вернуть текст предупреждения, если Instagram-cookies отсутствуют или
+    устарели; иначе None. YouTube тут ни при чём — он работает без cookies."""
+    path = Path(cookies_file)
+    if not path.is_file() or path.stat().st_size == 0:
+        return (
+            "⚠️ [ReSave] cookies.txt отсутствует — скачивание из Instagram работать не будет.\n"
+            "Экспортируй cookies и положи в ~/Downloads/cookies.txt (см. README)."
+        )
+
+    newest_expiry = 0
+    has_instagram = False
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line.startswith("#") or "instagram.com" not in line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 7:
+            continue
+        has_instagram = True
+        if parts[4].isdigit():
+            newest_expiry = max(newest_expiry, int(parts[4]))
+
+    if not has_instagram:
+        return (
+            "⚠️ [ReSave] в cookies.txt нет Instagram-cookies — Instagram-загрузки недоступны.\n"
+            "Обнови cookies.txt (см. README)."
+        )
+
+    now = time.time()
+    if newest_expiry and newest_expiry < now:
+        return "⚠️ [ReSave] Instagram-cookies просрочены — нужен ре-логин (см. README)."
+    file_age_days = (now - path.stat().st_mtime) / 86400
+    if file_age_days > max_age_days:
+        return (
+            f"⚠️ [ReSave] cookies.txt не обновлялся {file_age_days:.0f} дн. "
+            "Если Instagram начнёт отказывать — обнови cookies.txt (см. README)."
+        )
+    return None
+
+
 async def run():
     settings = config.validate_settings()
 
@@ -174,6 +215,11 @@ async def run():
             )
             logger.warning(warning_text)
             await notify_admins_async(bot, f"⚠️ [YTDLMSaver] {warning_text}")
+
+        cookies_warning = check_instagram_cookies(settings.cookies_file)
+        if cookies_warning:
+            logger.warning(cookies_warning)
+            await notify_admins_async(bot, cookies_warning)
 
         download_manager.set_bot(sync_bot)
         set_download_manager(download_manager)
