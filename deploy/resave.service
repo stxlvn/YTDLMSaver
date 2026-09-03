@@ -1,0 +1,16 @@
+[Unit]
+Description=ReSave — Telegram media downloader bot
+After=network-online.target bgutil-pot.service docker.service
+Wants=network-online.target bgutil-pot.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/ReSave
+EnvironmentFile=-/root/ReSave/.env
+ExecStart=/root/ReSave/venv/bin/python main.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

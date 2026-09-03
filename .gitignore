@@ -30,4 +30,6 @@ user_langs.json
 
 test_config.py
 venv/
-.env*
+.env
+.env.*
+!.env.example
