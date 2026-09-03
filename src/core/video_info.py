@@ -5,8 +5,6 @@ import config
 
 logger = logging.getLogger(__name__)
 
-cookie_path = config.COOKIES_FILE
-
 
 def run_ydl_with_geo_fallback(ydl_opts: dict, action):
     """Run `action(ydl)`; on an apparent region block, retry once through
@@ -33,9 +31,10 @@ def fetch_video_info_result(url):
             "socket_timeout": 10,
             "retries": 2,
             "extractor_retries": 2,
-            "cookiefile": cookie_path,
             "nocheckcertificate": True,
             "ignore_no_formats_error": True,
+            **config.cookie_ydl_opts(),
+            **config.youtube_ydl_opts(),
             **config.geo_ydl_opts(),
         }
 
@@ -62,9 +61,10 @@ def check_subtitles_available(url):
             "socket_timeout": 5,
             "retries": 2,
             "extractor_retries": 2,
-            "cookiefile": cookie_path,
             "nocheckcertificate": True,
             "ignore_no_formats_error": True,
+            **config.cookie_ydl_opts(),
+            **config.youtube_ydl_opts(),
             **config.geo_ydl_opts(),
         }
 

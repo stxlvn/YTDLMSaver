@@ -180,6 +180,32 @@ UPLOAD_RETRY_CONFIG = {
 UPLOAD_TIMEOUT = 300
 
 
+def cookie_ydl_opts() -> dict:
+    """Pass cookiefile to yt-dlp only when cookies.txt exists and is non-empty.
+
+    YouTube runs cookie-free (PO tokens via bgutil provider); Instagram/other
+    authenticated sources still pick up cookies.txt when it is present.
+    """
+    path = Path(COOKIES_FILE)
+    try:
+        if path.is_file() and path.stat().st_size > 0:
+            return {"cookiefile": str(path)}
+    except OSError:
+        pass
+    return {}
+
+
+def youtube_ydl_opts() -> dict:
+    """POT-friendly YouTube client selection.
+
+    The bgutil PO-token provider supplies the tokens the ``tv`` / ``web_safari``
+    clients need, so no account cookies are required. The forced ``mweb`` client
+    used previously needed its own cookies + PO token (and the option key was
+    misspelled ``player-client``, so yt-dlp ignored it anyway).
+    """
+    return {"extractor_args": {"youtube": ["player_client=default,tv,web_safari"]}}
+
+
 def geo_ydl_opts() -> dict:
     """yt-dlp options to spoof the region for geo-restricted videos, if configured."""
     opts: dict = {"geo_bypass": True}
