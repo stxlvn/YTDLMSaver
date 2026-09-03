@@ -236,21 +236,37 @@ python -m pytest tests/ -q
 
 ## Запуск как systemd-сервис (Linux)
 
+Готовые юниты — в `deploy/`:
+
+- `deploy/bgutil-pot.service` — PO-token провайдер для YouTube (порт 4416);
+- `deploy/resave.service` — сам бот (`After=bgutil-pot.service`).
+
 ```bash
-sudo systemctl start ytdlmsaver
-sudo systemctl status ytdlmsaver
+sudo cp deploy/*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bgutil-pot resave
 ```
 
 Полезные команды:
 
 ```bash
-sudo systemctl restart ytdlmsaver
-journalctl -u ytdlmsaver -f
-sudo systemctl enable ytdlmsaver
+sudo systemctl restart resave
+journalctl -u resave -f
+journalctl -u bgutil-pot -f
+curl -s 127.0.0.1:4416/ping        # жив ли PO-token провайдер
+```
+
+Cron (keep-alive Instagram/YouTube-сессий и приём вручную экспортированных cookies):
+
+```cron
+0 */6 * * * /root/ReSave/scripts/refresh_cookies.sh >> /var/log/cookies_refresh.log 2>&1
+*    *   * * * /root/ReSave/scripts/deploy_cookies.sh
 ```
 
 ## Примечания
 
 - Если `ffmpeg` не установлен, часть медиавозможностей может быть недоступна.
 - Бот больше не устанавливает зависимости на лету: перед запуском нужно явно выполнить `pip install -r requirements.txt`.
+- Для YouTube нужен запущенный `bgutil-pot.service` + Node.js (сборка провайдера). Без него часть видео вернёт «Sign in to confirm you're not a bot».
+- Playwright и его Firefox (`requirements-cookies.txt` + `playwright install firefox`) нужны только для keep-alive cookies, не для самого бота.
 - Обычные плейлисты ставятся в очередь автоматически в максимальном доступном качестве.
