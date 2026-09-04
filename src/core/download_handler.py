@@ -319,10 +319,13 @@ def _base_ydl_params(variant: "DownloadVariant") -> dict:
         "overwrites": True,
         "trim_file_name": 180,
         "nocheckcertificate": True,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
-        },
+        # No custom User-Agent: PO-token-protected CDN URLs (age-restricted /
+        # some other videos) are bound to the UA yt-dlp used to extract the
+        # format, and this override didn't match it — CDN download got a
+        # blanket HTTP 403 for that content. yt-dlp's own per-client UA is
+        # what the signed URL expects; only override headers that can't
+        # cause that kind of mismatch.
+        "http_headers": {"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8"},
         **config.cookie_ydl_opts(),
         **config.common_ydl_opts(),
         **config.geo_ydl_opts(),

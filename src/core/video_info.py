@@ -35,6 +35,16 @@ def run_ydl_with_geo_fallback(ydl_opts: dict, action):
         raise
 
 
+def _is_formatless(info: dict | None) -> bool:
+    """True when extract_info succeeded but returned no playable formats.
+
+    With ``ignore_no_formats_error`` set, an age-gate doesn't raise (which is
+    what run_ydl_with_geo_fallback's except-based retry needs) — it just comes
+    back as an info dict with an empty ``formats`` list. Catch that case here.
+    """
+    return bool(info) and info.get("_type") != "playlist" and not info.get("formats")
+
+
 def fetch_video_info_result(url):
     try:
         ydl_opts = {
@@ -53,6 +63,15 @@ def fetch_video_info_result(url):
         }
 
         info = run_ydl_with_geo_fallback(ydl_opts, lambda ydl: ydl.extract_info(url, download=False))
+
+        if _is_formatless(info) and config.has_yt_cookies():
+            logger.info("Нет форматов (похоже на возрастное ограничение), пробую с yt_cookies.txt")
+            aged_opts = {**ydl_opts, **config.yt_cookie_ydl_opts()}
+            with yt_dlp.YoutubeDL(aged_opts) as ydl:
+                aged_info = ydl.extract_info(url, download=False)
+            if aged_info and aged_info.get("formats"):
+                info = aged_info
+
         return info, None
 
     except Exception as e:
@@ -85,15 +104,18 @@ def check_subtitles_available(url):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            if not info:
-                return False
+        if _is_formatless(info) and config.has_yt_cookies():
+            aged_opts = {**ydl_opts, **config.yt_cookie_ydl_opts()}
+            with yt_dlp.YoutubeDL(aged_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
 
-            subtitles = info.get('subtitles', {})
-            auto_captions = info.get('automatic_captions', {})
+        if not info:
+            return False
 
-            has_subtitles = bool(subtitles or auto_captions)
+        subtitles = info.get('subtitles', {})
+        auto_captions = info.get('automatic_captions', {})
 
-            return has_subtitles
+        return bool(subtitles or auto_captions)
 
     except Exception as e:
         logger.warning(f"Ошибка при проверке субтитров: {e}")
