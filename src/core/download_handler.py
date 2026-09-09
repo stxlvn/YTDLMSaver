@@ -684,15 +684,15 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
             with open(image_files[0], 'rb') as f:
                 ext = image_files[0].lower().split('.')[-1]
                 if ext in ['mp4', 'mov', 'webm']:
-                    bot.send_video(task.chat_id, BufferedInputFile(f.read(), filename=f"video.{ext}"), caption=part1, parse_mode="HTML", supports_streaming=True)
+                    bot.send_video(task.chat_id, BufferedInputFile(f.read(), filename=f"video.{ext}"), caption=part1, parse_mode="HTML", supports_streaming=True, message_thread_id=task.message_thread_id)
                 else:
-                    bot.send_photo(task.chat_id, BufferedInputFile(f.read(), filename="photo.jpg"), caption=part1, parse_mode="HTML")
+                    bot.send_photo(task.chat_id, BufferedInputFile(f.read(), filename="photo.jpg"), caption=part1, parse_mode="HTML", message_thread_id=task.message_thread_id)
         else:
             for offset in range(0, len(image_files), 10):
                 chunk = image_files[offset:offset+10]
                 if len(chunk) == 1:
                     with open(chunk[0], 'rb') as f:
-                        bot.send_photo(task.chat_id, BufferedInputFile(f.read(), filename="photo.jpg"), caption=part1 if offset == 0 else None, parse_mode="HTML")
+                        bot.send_photo(task.chat_id, BufferedInputFile(f.read(), filename="photo.jpg"), caption=part1 if offset == 0 else None, parse_mode="HTML", message_thread_id=task.message_thread_id)
                 else:
                     media = []
                     for idx, path in enumerate(chunk):
@@ -707,13 +707,13 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
                                     parse_mode="HTML" if offset == 0 and idx == 0 else None
                                 )
                             )
-                    bot.send_media_group(task.chat_id, media)
+                    bot.send_media_group(task.chat_id, media, message_thread_id=task.message_thread_id)
     except Exception as e:
         logger.error(f"Ошибка при отправке фото: {e}")
         raise
 
     if part2:
-        try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML')
+        try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML', message_thread_id=task.message_thread_id)
         except Exception: pass
 
     if not task.silent_mode:
@@ -750,7 +750,7 @@ def _download_and_send_video(task, bot, temp_dir):
                 c_caption = MessageTemplate.format_caption(c_title, getattr(task, "url", ""), getattr(task, "action", "video"), chat_id=task.chat_id, description=c_desc)
                 part1, part2 = MessageTemplate.split_caption(c_caption, 1024)
                 if media_type == "video":
-                    kwargs = {'supports_streaming': True, 'caption': part1, 'parse_mode': 'HTML'}
+                    kwargs = {'supports_streaming': True, 'caption': part1, 'parse_mode': 'HTML', 'message_thread_id': task.message_thread_id}
                     if c_width: kwargs['width'] = c_width
                     if c_height: kwargs['height'] = c_height
 
@@ -759,11 +759,11 @@ def _download_and_send_video(task, bot, temp_dir):
 
                     bot.send_video(task.chat_id, file_id, **kwargs)
                 elif media_type == "audio":
-                    bot.send_audio(task.chat_id, file_id, caption=part1, parse_mode='HTML')
+                    bot.send_audio(task.chat_id, file_id, caption=part1, parse_mode='HTML', message_thread_id=task.message_thread_id)
                 else:
-                    bot.send_document(task.chat_id, file_id, caption=part1, parse_mode='HTML')
+                    bot.send_document(task.chat_id, file_id, caption=part1, parse_mode='HTML', message_thread_id=task.message_thread_id)
                 if part2:
-                    try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML')
+                    try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML', message_thread_id=task.message_thread_id)
                     except Exception: pass
                 if not task.silent_mode:
                     try:
@@ -825,7 +825,7 @@ def _download_and_send_video(task, bot, temp_dir):
         })
 
     if part2:
-        try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML')
+        try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML', message_thread_id=task.message_thread_id)
         except Exception: pass
 
     if not task.silent_mode:

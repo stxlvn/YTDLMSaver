@@ -64,6 +64,7 @@ class DownloadManager:
         action,
         format_param=None,
         reply_to_id=None,
+        message_thread_id=None,
         silent_mode=False,
     ):
         task = DownloadTask(
@@ -75,6 +76,7 @@ class DownloadManager:
             format_param=format_param,
             cancel_event=threading.Event(),
             reply_to_id=reply_to_id,
+            message_thread_id=message_thread_id,
             silent_mode=silent_mode,
         )
 

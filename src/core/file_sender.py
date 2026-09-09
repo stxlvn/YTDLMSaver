@@ -218,6 +218,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             parse_mode="HTML",
             timeout=600,
             reply_to_message_id=task.reply_to_id,
+            message_thread_id=task.message_thread_id,
             visible_file_name=visible_file_name,
             on_progress=_make_upload_progress_callback(task),
         )
@@ -254,6 +255,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
                     performer=task.info.get("uploader", "Unknown"),
                     timeout=300,
                     reply_to_message_id=task.reply_to_id,
+                    message_thread_id=task.message_thread_id,
                     on_progress=_make_upload_progress_callback(task),
                     **audio_kwargs,
                 )
@@ -311,6 +313,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
                 supports_streaming=True,
                 timeout=600,
                 reply_to_message_id=task.reply_to_id,
+                message_thread_id=task.message_thread_id,
                 on_progress=_make_upload_progress_callback(task),
                 **video_kwargs,
             )
