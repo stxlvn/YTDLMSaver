@@ -47,6 +47,7 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
             caption=caption,
             parse_mode="HTML",
             reply_to_message_id=task.reply_to_id,
+            message_thread_id=task.message_thread_id,
             timeout=120,
         )
     else:
@@ -60,6 +61,7 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
                     caption=caption if offset == 0 else None,
                     parse_mode="HTML" if offset == 0 else None,
                     reply_to_message_id=task.reply_to_id if offset == 0 else None,
+                    message_thread_id=task.message_thread_id,
                     timeout=120,
                 )
                 continue
@@ -77,6 +79,7 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
                 task.chat_id,
                 media,
                 reply_to_message_id=task.reply_to_id if offset == 0 else None,
+                message_thread_id=task.message_thread_id,
                 timeout=180,
             )
 
@@ -161,6 +164,7 @@ def convert_to_gif_and_send(task, video_path, bot):
                 file_obj,
                 caption=gif_caption,
                 reply_to_message_id=task.reply_to_id,
+                message_thread_id=task.message_thread_id,
                 parse_mode="HTML",
             )
 
@@ -327,6 +331,7 @@ def download_and_send_subtitles(task, bot, temp_dir):
                     file_obj,
                     caption=sub_caption,
                     reply_to_message_id=task.reply_to_id,
+                    message_thread_id=task.message_thread_id,
                     parse_mode="HTML",
                 )
             srt_path.unlink(missing_ok=True)
@@ -425,6 +430,7 @@ def download_and_send_thumbnail(task, bot, temp_dir):
             caption=MessageTemplate.format_thumbnail_caption(title, task.url),
             visible_file_name=file_name,
             reply_to_message_id=task.reply_to_id,
+            message_thread_id=task.message_thread_id,
             parse_mode="HTML",
             timeout=120,
         )

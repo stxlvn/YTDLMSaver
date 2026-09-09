@@ -29,6 +29,18 @@ def set_download_manager(manager):
 
 def get_download_manager(): return _download_manager
 
+
+def _topic_id(obj) -> int | None:
+    """Forum-topic id of an incoming message / callback message, or None.
+
+    Only real forum-topic messages carry `is_topic_message`; the General
+    topic and plain groups don't, so replies there must stay unthreaded.
+    """
+    msg = getattr(obj, "message", obj)
+    if getattr(msg, "is_topic_message", False):
+        return getattr(msg, "message_thread_id", None)
+    return None
+
 def get_markup_builder(chat_id):
     def builder(message_id, info, resolutions):
         url = info.get("webpage_url") or info.get("original_url")
@@ -232,6 +244,7 @@ def register_download_handlers(router: Router, sync_bot):
 
         url = _extract_download_target(text, message.entities, message.caption_entities)
         chat_id = message.chat.id
+        thread_id = _topic_id(message)
         if not url:
             if message.chat.type == "private":
                 await message.reply(ui_manager.format_panel(i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"), parse_mode="HTML")
@@ -243,7 +256,7 @@ def register_download_handlers(router: Router, sync_bot):
 
         if message.chat.type in {"group", "supergroup"} and not is_tt and not is_ig:
             logger.info("Получена ссылка в группе %s: %s", chat_id, url)
-            _run_background_thread(_handle_group_download, url, chat_id, message.message_id, _download_manager, label=f"group_download:{chat_id}:{message.message_id}")
+            _run_background_thread(_handle_group_download, url, chat_id, message.message_id, _download_manager, thread_id, label=f"group_download:{chat_id}:{message.message_id}")
             return
 
         if is_tt or is_ig:
@@ -260,7 +273,8 @@ def register_download_handlers(router: Router, sync_bot):
                     message_id=s_msg.message_id,
                     info={"title": info.get("title", ""), "description": info.get("description", ""), "duration": None},
                     action="tiktok_photo" if is_tt else "instagram_photo",
-                    reply_to_id=message.message_id
+                    reply_to_id=message.message_id,
+                    message_thread_id=thread_id,
                 )
 
             _run_background_thread(_bg_photo_task, label=f"bg_photo:{chat_id}:{message.message_id}")
@@ -268,11 +282,11 @@ def register_download_handlers(router: Router, sync_bot):
 
         if any(x in url.lower() for x in ['tiktok.com', 'instagram.com/reel', 'youtube.com/shorts', 'youtu.be/shorts']):
             s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_fast_title"), [i18n.get(chat_id, "status_fast_desc")], icon="⚡"), parse_mode="HTML")
-            _download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info={"title": "", "duration": None}, action="best", reply_to_id=message.message_id)
+            _download_manager.add_task(url=url, chat_id=chat_id, message_id=s_msg.message_id, info={"title": "", "duration": None}, action="best", reply_to_id=message.message_id, message_thread_id=thread_id)
             return
 
         s_msg = await message.reply(ui_manager.format_panel(i18n.get(chat_id, "status_search_title"), [i18n.get(chat_id, "status_search_desc")], icon="🔍"), parse_mode="HTML")
-        _run_background_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, label=f"video_info:{chat_id}:{message.message_id}", download_manager=_download_manager, build_download_markup=get_markup_builder(chat_id))
+        _run_background_thread(_extract_video_info, sync_bot, chat_id, message.message_id, url, s_msg.message_id, video_info_cache, label=f"video_info:{chat_id}:{message.message_id}", download_manager=_download_manager, build_download_markup=get_markup_builder(chat_id), message_thread_id=thread_id)
 
     async def handle_download(call: CallbackQuery):
         parts = call.data.split("_")
@@ -282,7 +296,7 @@ def register_download_handlers(router: Router, sync_bot):
         dl_info = video_info_cache[orig_id]
         await call.answer(i18n.get(chat_id, "status_add_queue_alert"))
         await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_add_queue_title"), [i18n.get(chat_id, "status_add_queue_desc")], icon="📥"), parse_mode="HTML")
-        _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None)
+        _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None, message_thread_id=dl_info.get("thread_id") or _topic_id(call.message))
         video_info_cache.pop(orig_id, None)
 
     async def handle_cancel_all(call: CallbackQuery):

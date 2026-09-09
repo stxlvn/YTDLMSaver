@@ -25,4 +25,11 @@ class DownloadTask:
     work_dir: Optional[str] = None
     cancel_event: Optional[threading.Event] = None
     reply_to_id: Optional[int] = None
+    message_thread_id: Optional[int] = None
     silent_mode: bool = False
+
+    @property
+    def thread_kwargs(self) -> dict:
+        if self.message_thread_id:
+            return {"message_thread_id": self.message_thread_id}
+        return {}

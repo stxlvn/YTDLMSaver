@@ -92,6 +92,7 @@ def queue_playlist_downloads(
     reply_to_id: int,
     info: dict,
     silent_mode: bool,
+    message_thread_id: int | None = None,
 ) -> int:
     playlist_entries = collect_playlist_entries(info)
     queued = 0
@@ -109,6 +110,7 @@ def queue_playlist_downloads(
             },
             action="best",
             reply_to_id=reply_to_id,
+            message_thread_id=message_thread_id,
             silent_mode=silent_mode,
         )
         queued += 1
@@ -130,7 +132,7 @@ def build_playlist_queued_text(info: dict, queued_count: int) -> str:
     )
 
 
-def handle_group_download(url: str, chat_id: int, message_id: int, download_manager):
+def handle_group_download(url: str, chat_id: int, message_id: int, download_manager, message_thread_id: int | None = None):
     # Мгновенно отсекаем ссылки t.me (посты, каналы, файлы)
     if is_telegram_link(url):
         return
@@ -146,6 +148,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
                 info={"title": "TikTok photo", "duration": None},
                 action="tiktok_photo",
                 reply_to_id=message_id,
+                message_thread_id=message_thread_id,
                 silent_mode=True,
             )
             return
@@ -180,6 +183,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
                 reply_to_id=message_id,
                 info=info,
                 silent_mode=True,
+                message_thread_id=message_thread_id,
             )
             return
 
@@ -190,6 +194,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
             info=info,
             action="best",
             reply_to_id=message_id,
+            message_thread_id=message_thread_id,
             silent_mode=True,
         )
     except Exception as exc:
@@ -208,6 +213,7 @@ def extract_video_info(
     *,
     download_manager,
     build_download_markup,
+    message_thread_id: int | None = None,
 ):
     ui_manager = get_ui_manager()
 
@@ -239,6 +245,7 @@ def extract_video_info(
                 reply_to_id=user_message_id,
                 info=info,
                 silent_mode=True,
+                message_thread_id=message_thread_id,
             )
 
             if queued_count == 0:
@@ -271,6 +278,7 @@ def extract_video_info(
             "info": info,
             "resolutions": resolutions,
             "chat_id": chat_id,
+            "thread_id": message_thread_id,
         }
 
         markup = build_download_markup(user_message_id, info, resolutions)
