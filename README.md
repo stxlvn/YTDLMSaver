@@ -1,245 +1,138 @@
+<img src="logo.png" alt="YTDLMSaver" width="120" />
+
 # YTDLMSaver
 
-<div align="center">
-  <img src="logo.png" alt="YTDLMSaver logo" width="180" />
+**Telegram-бот, который скачивает медиа по ссылке и присылает файл обратно в чат.**
 
-  <h3>Telegram-бот для скачивания медиаконтента</h3>
+[![CI](https://github.com/stxlvn/YTDLMSaver/actions/workflows/ci.yml/badge.svg)](https://github.com/stxlvn/YTDLMSaver/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![aiogram](https://img.shields.io/badge/aiogram-3.31-blue)
+![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
-## Что умеет бот
+---
 
-- Скачивает видео по ссылке с популярных платформ через `yt-dlp`.
-- Поддерживает работу в группах.
-- Грузит видео в фоне и отправляет результат по готовности.
-- Показывает все доступные разрешения YouTube, включая 1080p, 1440p, 4K и 8K.
-- Автоматически скачивает и объединяет лучшие video+audio потоки через FFmpeg.
-- Использует общую очередь без пользовательских лимитов.
-- Хранит статистику в SQLite и автоматически мигрирует старый `user_stats.json`.
-- Поддерживает админ-команды и базовую статистику.
+## Что умеет
+
+| | |
+|---|---|
+| 🎬 **Видео** | любое качество вплоть до 8K, video+audio склеиваются через FFmpeg |
+| 🎵 **Аудио** | извлечение в MP3 192 kbps |
+| 🖼️ **Превью и субтитры** | обложка видео, `.srt` (ru/en, вкл. авто-сабы) |
+| ✨ **GIF** | из роликов до 30 секунд |
+| 📸 **Фото из соцсетей** | посты и карусели Instagram, фото-слайды TikTok |
+| 🌐 **Источники** | всё, что понимает `yt-dlp` (~1800 сайтов) + Instagram/TikTok через `gallery-dl` / tikwm |
+
+**В личке** — бот распознаёт источник и предлагает форматы цветными кнопками.
+**В группах и топиках форума** — молча берёт максимальное качество и присылает файл
+в тот же топик, откуда пришла ссылка. Плейлисты ставятся в очередь целиком.
+
+Ещё: фоновая очередь с прогресс-баром и ETA, статистика в SQLite, интерфейс на
+русском и английском (`/lang`), панель администратора и рассылка.
+
+---
+
+## Как это работает
+
+```
+ссылка → определение источника → выбор формата (в личке кнопкой) →
+фоновая загрузка → склейка FFmpeg → отправка файла в тот же чат/топик
+```
+
+Файлы уходят через **локальный `telegram-bot-api`** (до 2 ГБ). Без него бот
+работает через облачный Bot API с лимитом ~50 МБ.
+
+---
 
 ## Быстрый старт
 
-### Установка зависимостей
-
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/stxlvn/YTDLMSaver.git && cd YTDLMSaver
+python3.12 -m venv venv && ./venv/bin/pip install -r requirements.txt
+cp .env.example .env          # впишите BOT_TOKEN и ADMIN_IDS
+./venv/bin/python main.py
 ```
 
-### Настройка `.env`
+Нужны в системе: **FFmpeg** (склейка, аудио, GIF) и **Node.js ≥ 18** (провайдер
+PO-токенов для YouTube, см. ниже).
 
-Скопируйте `.env.example` в `.env` и заполните нужные значения:
+Минимальный `.env` — облачный Bot API, файлы до ~50 МБ:
 
 ```env
-BOT_TOKEN=ваш_токен_бота
+BOT_TOKEN=токен_от_BotFather
 ADMIN_IDS=123456789
 ```
 
-Для отправки файлов больше стандартного лимита Bot API поднимите локальный
-`telegram-bot-api` и укажите его адрес. `TELEGRAM_API_ID` и
-`TELEGRAM_API_HASH` создаются на https://my.telegram.org/apps.
+---
 
-```env
-BOT_API_BASE_URL=http://127.0.0.1:8081
-BOT_API_IS_LOCAL=true
-MAX_FILE_SIZE=2097152000
-SEND_AS_DOC_LIMIT=2097152000
-DOWNLOAD_RATE_LIMIT_BYTES=4194304
-DOWNLOAD_STALL_TIMEOUT_SECONDS=300
-TELEGRAM_API_ID=ваш_api_id
-TELEGRAM_API_HASH=ваш_api_hash
-```
+## Cookies и обход блокировок
 
-Запуск локального Bot API через Docker:
+<details>
+<summary><b>YouTube — cookies не нужны</b></summary>
 
-```bash
-docker compose up -d telegram-bot-api
-docker compose logs -f telegram-bot-api
-```
-
-После этого запускайте бота обычной командой:
-
-```bash
-python main.py
-```
-
-### Запуск без локального Bot API на alwaysdata
-
-Docker не обязателен для работы бота. Но для отправки файлов больше облачного
-лимита Telegram нужен локальный `telegram-bot-api`. Если на сервере нет
-локального `telegram-bot-api`, оставьте `BOT_API_BASE_URL` пустым или удалите
-эту переменную из `.env`.
-
-Минимальный `.env` для Python-only запуска:
-
-```env
-BOT_TOKEN=ваш_токен_бота
-ADMIN_IDS=123456789
-MAX_FILE_SIZE=52428800
-SEND_AS_DOC_LIMIT=52428800
-```
-
-Команда для вкладки Service на alwaysdata:
-
-```bash
-bash -c 'export PATH=$HOME/.local/bin:$HOME/ffmpeg/ffmpeg-7.0.2-amd64-static:$PATH && cd /home/renothing/YTDLMSaver && python main.py'
-```
-
-В таком режиме бот работает через облачный Telegram Bot API. Это полностью
-Python-запуск, но отправка файлов ограничена примерно 50 MB. Собственный
-FastAPI/Flask API можно добавить для внешних запросов к вашему сервису, но он
-не заменит локальный `telegram-bot-api` и не снимет лимит Telegram на загрузку
-больших файлов.
-
-### Локальный Bot API без Docker на alwaysdata
-
-Чтобы отправлять файлы до 2000 MB без Docker, установите бинарник
-`telegram-bot-api` в домашнюю директорию, например в
-`$HOME/.local/bin/telegram-bot-api`, и запускайте его вместе с ботом одним
-Service-процессом.
-
-Собрать Linux-бинарник на Mac можно через Docker:
-
-```bash
-bash scripts/build_telegram_bot_api_linux_amd64.sh
-```
-
-Готовый файл появится здесь:
-
-```bash
-dist/telegram-bot-api-linux-amd64
-```
-
-Загрузите его на сервер:
-
-```bash
-scp dist/telegram-bot-api-linux-amd64 renothing@ssh-renothing.alwaysdata.net:/home/renothing/.local/bin/telegram-bot-api
-ssh renothing@ssh-renothing.alwaysdata.net 'chmod +x /home/renothing/.local/bin/telegram-bot-api'
-```
-
-В `.env` нужны:
-
-```env
-BOT_TOKEN=ваш_токен_бота
-ADMIN_IDS=123456789
-TELEGRAM_API_ID=ваш_api_id
-TELEGRAM_API_HASH=ваш_api_hash
-MAX_FILE_SIZE=2097152000
-SEND_AS_DOC_LIMIT=2097152000
-DOWNLOAD_RATE_LIMIT_BYTES=4194304
-DOWNLOAD_STALL_TIMEOUT_SECONDS=300
-MAX_CONCURRENT_DOWNLOADS=1
-```
-
-Команда для вкладки Service:
-
-```bash
-bash /home/renothing/YTDLMSaver/scripts/run_alwaysdata_local_bot_api.sh
-```
-
-По умолчанию скрипт ожидает бинарник здесь:
-
-```bash
-/home/renothing/.local/bin/telegram-bot-api
-```
-
-Если путь другой, задайте его перед запуском:
-
-```bash
-bash -c 'export BOT_API_BIN=$HOME/telegram-bot-api/bin/telegram-bot-api && bash /home/renothing/YTDLMSaver/scripts/run_alwaysdata_local_bot_api.sh'
-```
-
-Скрипт поднимает Bot API на `127.0.0.1:8081`, поэтому он доступен только боту внутри этого же Service-процесса. Это безопаснее, чем открывать порт сервиса наружу.
-
-### Cookies и обход блокировок
-
-**YouTube — cookies не нужны.** Токены Proof-of-Origin (PO tokens), которыми
-YouTube защищается от «Sign in to confirm you're not a bot», выдаёт локальный
-провайдер `bgutil-ytdlp-pot-provider`. Он ставится вместе с зависимостями
-(`pip install -r requirements.txt`) и поднимается как отдельный сервис:
+От «Sign in to confirm you're not a bot» защищают Proof-of-Origin токены, а не
+аккаунт. Их выдаёт локальный провайдер
+[`bgutil-ytdlp-pot-provider`](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
+— yt-dlp сам ходит к нему на `127.0.0.1:4416`.
 
 ```bash
 git clone https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git ~/bgutil-ytdlp-pot-provider
 cd ~/bgutil-ytdlp-pot-provider/server && npm ci && npx tsc
-node build/main.js -p 4416   # проверка вручную; в проде — systemd-юнит bgutil-pot.service
+node build/main.js -p 4416        # проверка; в проде — systemd-юнит (см. deploy/)
 ```
 
-yt-dlp находит провайдер на `http://127.0.0.1:4416` автоматически.
+</details>
 
-**Instagram — нужен залогиненный аккаунт.** Instagram почти ничего не отдаёт
-без входа. Экспортируйте cookies браузерным расширением («Get cookies.txt»)
-в файл `cookies.txt` рядом с `main.py`. Дальше сессию продлевает
-`scripts/refresh_cookies.py` (cron, раз в 6 ч, headless-Firefox через
-Playwright). 100%-й автоматики для Instagram не существует — примерно раз в
-месяц сессия слетает и бот присылает админу уведомление: нужно заново
-экспортировать `cookies.txt` в `~/Downloads` (≈2 минуты), остальное
-автоматически.
+<details>
+<summary><b>Instagram — нужен залогиненный аккаунт</b></summary>
 
-Установка Playwright для keep-alive:
+Instagram почти ничего не отдаёт анонимно. Экспортируйте cookies браузерным
+расширением («Get cookies.txt LOCALLY») в файл **`cookies.txt`** рядом с `main.py`.
+
+Сессию продлевает `scripts/refresh_cookies.py` (cron, раз в 6 ч, headless-Firefox
+через Playwright). Полной автоматики не существует: примерно раз в месяц сессия
+слетает — бот пишет админу в Telegram, нужно заново экспортировать `cookies.txt`
+в `~/Downloads` (≈2 минуты), дальше подхватится само.
 
 ```bash
 ./venv/bin/pip install -r requirements-cookies.txt
 ./venv/bin/playwright install firefox
-./venv/bin/python scripts/seed_cookie_profile.py   # засеять профиль из cookies.txt
+./venv/bin/python scripts/seed_cookie_profile.py     # засеять профиль keep-alive
 ```
 
-**Возрастные видео YouTube (18+) — отдельный опциональный файл.** Обойти
-age-gate без входа в аккаунт больше нельзя. Заведите одноразовый Google-аккаунт,
-подтвердите в нём возраст, экспортируйте его cookies в `yt_cookies.txt` (env
-`YT_COOKIES_FILE`). Этот файл используется **только** как повторная попытка,
-когда обычная (без cookies) упёрлась в age-gate — на основной путь YouTube он
-не влияет. `refresh_cookies.py` продлевает и эту сессию (отдельный профиль,
-отдельное уведомление). Без `yt_cookies.txt` возрастные видео просто отдают
-понятную ошибку, всё остальное работает.
+</details>
 
-### Запуск
+<details>
+<summary><b>Возрастные видео YouTube (18+) — опционально</b></summary>
+
+Обойти age-gate без аккаунта уже нельзя. Заведите одноразовый age-verified
+Google-аккаунт, экспортируйте его cookies в **`yt_cookies.txt`** (env
+`YT_COOKIES_FILE`). Файл используется **только** как повторная попытка при
+age-gate — на основной (cookie-free) путь YouTube не влияет. Без файла
+возрастные видео отдают понятную ошибку, остальное работает.
+
+</details>
+
+<details>
+<summary><b>Региональные блокировки</b></summary>
+
+`GEO_BYPASS_COUNTRY=DE` — подменить регион. `PROXY_URL=socks5://…` — при
+явной геоблокировке yt-dlp сам повторит запрос через прокси.
+
+</details>
+
+---
+
+## Развёртывание (Linux, systemd)
+
+**1. Локальный Bot API** (Docker) — для файлов больше 50 МБ. В `.env` добавьте
+`TELEGRAM_API_ID` / `TELEGRAM_API_HASH` ([my.telegram.org/apps](https://my.telegram.org/apps))
+и `BOT_API_BASE_URL=http://127.0.0.1:8082`, затем:
 
 ```bash
-python main.py
+docker compose up -d telegram-bot-api
 ```
 
-## Конфигурация
-
-Основные параметры находятся в `config.py`:
-
-| Параметр | Назначение |
-|---|---|
-| `BOT_TOKEN` | Токен Telegram-бота (читается из `.env`) |
-| `ADMIN_IDS` | ID администраторов |
-| `TEMP_DIR` | Временная директория для загрузок |
-| `STATS_DB_PATH` | SQLite-файл со статистикой |
-| `MAX_CONCURRENT_DOWNLOADS` | Число одновременно работающих загрузчиков; остальные задачи ждут в общей очереди |
-| `MAX_FILE_SIZE`, `SEND_AS_DOC_LIMIT` | Технический предел Telegram Bot API и порог отправки как документа |
-| `DOWNLOAD_RATE_LIMIT_BYTES` | Техническое ограничение скорости загрузчика для защиты Service от SIGKILL; `4194304` по умолчанию |
-| `DOWNLOAD_STALL_TIMEOUT_SECONDS` | Перезапуск формата, если загрузчик не показывает прогресс; `300` секунд по умолчанию |
-| `BOT_API_BASE_URL`, `BOT_API_IS_LOCAL` | Адрес локального Bot API для отправки файлов до 2000 MB |
-| `LOG_LEVEL` | Уровень логирования (`INFO`, `DEBUG`, ...) |
-
-## Структура проекта
-
-- `main.py` - точка входа.
-- `src/` - основная логика приложения.
-- `tests/` - автоматические тесты.
-- `temp_downloads/` - временные загруженные файлы.
-- `cookies.txt` - cookies Instagram (для gallery-dl и yt-dlp).
-- `yt_cookies.txt` - опционально, cookies одноразового Google-аккаунта для видео 18+.
-- `scripts/refresh_cookies.py` - keep-alive сессий (cron).
-- `database.db` - SQLite-база со статистикой.
-- `bot.log` - локальные логи.
-
-## Проверка проекта
-
-```bash
-python -m pytest tests/ -q
-```
-
-В репозитории настроен GitHub Actions workflow `CI` (`.github/workflows/ci.yml`):
-компиляция исходников, `pytest` и `pip-audit` на каждый push и pull request.
-
-## Запуск как systemd-сервис (Linux)
-
-Готовые юниты — в `deploy/`:
-
-- `deploy/bgutil-pot.service` — PO-token провайдер для YouTube (порт 4416);
-- `deploy/resave.service` — сам бот (`After=bgutil-pot.service`).
+**2. Сервисы** — готовые юниты в `deploy/`:
 
 ```bash
 sudo cp deploy/*.service /etc/systemd/system/
@@ -247,26 +140,78 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now bgutil-pot resave
 ```
 
-Полезные команды:
+| юнит | что делает |
+|---|---|
+| `bgutil-pot.service` | провайдер PO-токенов YouTube на `:4416` |
+| `resave.service` | сам бот, стартует `After=bgutil-pot.service` |
 
-```bash
-sudo systemctl restart resave
-journalctl -u resave -f
-journalctl -u bgutil-pot -f
-curl -s 127.0.0.1:4416/ping        # жив ли PO-token провайдер
-```
-
-Cron (keep-alive Instagram/YouTube-сессий и приём вручную экспортированных cookies):
+**3. Cron** — keep-alive сессий и приём вручную экспортированных cookies:
 
 ```cron
-0 */6 * * * /root/ReSave/scripts/refresh_cookies.sh >> /var/log/cookies_refresh.log 2>&1
-*    *   * * * /root/ReSave/scripts/deploy_cookies.sh
+0 */6 * * *  /root/YTDLMSaver/scripts/refresh_cookies.sh  >> /var/log/cookies_refresh.log 2>&1
+*   *   * * *  /root/YTDLMSaver/scripts/deploy_cookies.sh
 ```
 
-## Примечания
+**Диагностика:**
 
-- Если `ffmpeg` не установлен, часть медиавозможностей может быть недоступна.
-- Бот больше не устанавливает зависимости на лету: перед запуском нужно явно выполнить `pip install -r requirements.txt`.
-- Для YouTube нужен запущенный `bgutil-pot.service` + Node.js (сборка провайдера). Без него часть видео вернёт «Sign in to confirm you're not a bot».
-- Playwright и его Firefox (`requirements-cookies.txt` + `playwright install firefox`) нужны только для keep-alive cookies, не для самого бота.
-- Обычные плейлисты ставятся в очередь автоматически в максимальном доступном качестве.
+```bash
+journalctl -u resave -f
+curl -s 127.0.0.1:4416/ping        # жив ли провайдер PO-токенов
+```
+
+> Файлы без Docker (бинарник `telegram-bot-api` в домашней папке) —
+> см. `scripts/build_telegram_bot_api_linux_amd64.sh` и
+> `scripts/run_alwaysdata_local_bot_api.sh`.
+
+---
+
+## Конфигурация
+
+Всё через `.env` (полный список — в `.env.example`).
+
+| Переменная | Назначение | По умолчанию |
+|---|---|---|
+| `BOT_TOKEN` | токен от @BotFather | — (обязательно) |
+| `ADMIN_IDS` | ID админов через запятую | — |
+| `BOT_API_BASE_URL`, `BOT_API_IS_LOCAL` | адрес локального Bot API | облачный |
+| `MAX_FILE_SIZE`, `SEND_AS_DOC_LIMIT` | предел Bot API и порог отправки документом | 2 ГБ |
+| `MAX_CONCURRENT_DOWNLOADS` | параллельных загрузок, остальные в очереди | `1` |
+| `DOWNLOAD_RATE_LIMIT_BYTES` | лимит скорости загрузчика (защита от OOM/SIGKILL) | `4 МБ/с` |
+| `DOWNLOAD_STALL_TIMEOUT_SECONDS` | сменить формат, если нет прогресса | `300` |
+| `COOKIES_FILE`, `YT_COOKIES_FILE` | Instagram / YouTube-18+ cookies | рядом с `main.py` |
+| `GEO_BYPASS_COUNTRY`, `PROXY_URL` | обход региональных блокировок | выкл. |
+| `LOG_LEVEL` | `INFO` / `DEBUG` / … | `INFO` |
+
+---
+
+## Структура
+
+```
+main.py                  точка входа
+config.py                чтение .env
+src/
+  handlers/              приём сообщений, кнопки, админ-команды
+  core/                  очередь, загрузка (yt-dlp), отправка в Telegram
+  utils/                 адаптер aiogram, i18n, шаблоны сообщений, ретраи
+scripts/                 keep-alive cookies, деплой-хелперы
+deploy/                  systemd-юниты
+tests/                   pytest
+```
+
+Git-ignored в рантайме: `cookies.txt`, `yt_cookies.txt`, `database.db`
+(статистика), `user_langs.json`, `telegram_file_cache.json`, `temp_downloads/`.
+
+---
+
+## Разработка
+
+```bash
+./venv/bin/python -m pytest tests/ -q
+```
+
+CI (`.github/workflows/ci.yml`) на каждый push и PR: компиляция, `pytest`,
+`pip-audit`.
+
+---
+
+Форк [ReNothingg/ReSave](https://github.com/ReNothingg/ReSave). Лицензия — Apache-2.0.
