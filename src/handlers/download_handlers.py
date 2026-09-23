@@ -230,9 +230,27 @@ def _run_background_thread(func, *args, label: str, **kwargs):
     return task
 
 
+class _SelectionCache(dict):
+    """video_info_cache: keyed by (chat_id, user_message_id).
+
+    Entries are meant to be popped when the user picks a format, but Cancel
+    and simply-ignored messages never reach that path, so without a cap this
+    grows forever — one full yt-dlp info dict per unclicked link, for the
+    life of the process. Evict oldest past _MAX so an abandoned bot still
+    bounds its memory.
+    """
+
+    _MAX = 500
+
+    def __setitem__(self, key, value):
+        if len(self) >= self._MAX and key not in self:
+            del self[next(iter(self))]
+        super().__setitem__(key, value)
+
+
 def register_download_handlers(router: Router, sync_bot):
     ui_manager = get_ui_manager()
-    video_info_cache = {}
+    video_info_cache = _SelectionCache()
 
     async def process_url_message(message: Message, state: FSMContext):
         if message.from_user and message.from_user.is_bot: return
@@ -292,12 +310,13 @@ def register_download_handlers(router: Router, sync_bot):
         parts = call.data.split("_")
         action, orig_id = parts[1], int(parts[-1])
         chat_id = call.message.chat.id
-        if orig_id not in video_info_cache: return await call.answer(i18n.get(chat_id, "err_expired"))
-        dl_info = video_info_cache[orig_id]
+        cache_key = (chat_id, orig_id)
+        if cache_key not in video_info_cache: return await call.answer(i18n.get(chat_id, "err_expired"))
+        dl_info = video_info_cache[cache_key]
         await call.answer(i18n.get(chat_id, "status_add_queue_alert"))
         await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "status_add_queue_title"), [i18n.get(chat_id, "status_add_queue_desc")], icon="📥"), parse_mode="HTML")
         _download_manager.add_task(url=dl_info["url"], chat_id=chat_id, message_id=call.message.message_id, info=dl_info["info"], action=action, format_param=int(parts[2]) if action == "res" else None, message_thread_id=dl_info.get("thread_id") or _topic_id(call.message))
-        video_info_cache.pop(orig_id, None)
+        video_info_cache.pop(cache_key, None)
 
     async def handle_cancel_all(call: CallbackQuery):
         chat_id = call.message.chat.id
@@ -310,6 +329,10 @@ def register_download_handlers(router: Router, sync_bot):
 
     async def handle_cancel(call: CallbackQuery):
         await call.answer()
+        try:
+            video_info_cache.pop((call.message.chat.id, int(call.data.rsplit("_", 1)[-1])), None)
+        except (ValueError, AttributeError):
+            pass
         try: await call.message.delete()
         except Exception: await call.message.edit_text(ui_manager.format_panel("Отменено", icon="✕"), parse_mode="HTML")
 
