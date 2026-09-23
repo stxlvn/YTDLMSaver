@@ -40,6 +40,10 @@ CACHE_FILE = str(Path(__file__).resolve().parents[2] / "telegram_file_cache.json
 # read-modify-write, и при этом дергает _read_cache_locked/_write_cache_locked
 # из того же треда - обычный Lock тут заклинил бы поток сам на себя.
 _cache_lock = threading.RLock()
+# Без границы файл растёт вечно: одна запись на каждый когда-либо скачанный
+# url+action+качество, и каждое обновление перечитывает/переписывает весь
+# файл целиком - со временем каждая загрузка тратит всё больше на I/O кеша.
+_CACHE_MAX_ENTRIES = 5000
 
 
 def _read_cache_locked():
@@ -86,6 +90,8 @@ def update_file_cache_entry(cache_key, entry):
     with _cache_lock:
         cache = _read_cache_locked()
         cache[cache_key] = entry
+        while len(cache) > _CACHE_MAX_ENTRIES:
+            cache.pop(next(iter(cache)))
         try:
             _write_cache_locked(cache)
         except Exception as e:

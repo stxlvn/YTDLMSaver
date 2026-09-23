@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from aiogram import Bot, Router
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -302,8 +304,25 @@ def register_admin_handlers(router: Router):
             try:
                 await _send_broadcast_payload(bot, uid, payload)
                 sent += 1
+            except TelegramRetryAfter as exc:
+                # Telegram's own flood-control backoff, not a real failure -
+                # wait it out and retry this user once before giving up.
+                await asyncio.sleep(exc.retry_after)
+                try:
+                    await _send_broadcast_payload(bot, uid, payload)
+                    sent += 1
+                except Exception as retry_exc:
+                    failed += 1
+                    logger.warning("Рассылка: не удалось отправить %s после retry_after: %s", uid, retry_exc)
+            except TelegramForbiddenError:
+                failed += 1  # пользователь заблокировал бота - ожидаемо, не логируем
             except Exception as exc:
                 failed += 1
+                logger.warning("Рассылка: не удалось отправить %s: %s", uid, exc)
+            else:
+                # ~20 msg/s держит нас ниже общего лимита Bot API (30/s) и не
+                # долбит один и тот же чат чаще раза в секунду.
+                await asyncio.sleep(0.05)
             if index % 10 == 0 or index == total_users:
                 try: await call.message.edit_text(ui_manager.format_panel(i18n.get(chat_id, "admin_bc_progress"), [i18n.get(chat_id, "admin_bc_sent", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="📣"), parse_mode="HTML")
                 except Exception: pass

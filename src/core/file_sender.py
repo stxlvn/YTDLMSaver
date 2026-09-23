@@ -177,14 +177,12 @@ def _extract_file_id(res, attr: str) -> str | None:
 
 
 def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None) -> dict | None:
-    from ..utils.error_handler import get_error_handler
     from ..utils.retry_manager import (
         NonRetryableError,
         UPLOAD_RETRY_CONFIG,
         get_smart_retry_manager,
     )
 
-    error_handler = get_error_handler()
     retry_manager = get_smart_retry_manager(UPLOAD_RETRY_CONFIG)
 
     file_extension = Path(file_path).suffix.lower()
@@ -348,20 +346,14 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             except Exception:
                 pass
 
-    def on_failure(attempt, exception):
-        if exception and not task.silent_mode:
-            error_msg = error_handler.handle_error(exception)
-            try:
-                bot.edit_message_text(error_msg.user_message, task.chat_id, task.message_id)
-            except Exception:
-                pass
-
     try:
+        # No on_failure callback here: handle_download_task's except block
+        # always overwrites this same status message right after we re-raise
+        # below, so an intermediate edit here would just be wasted API calls.
         retry_manager.retry_operation_smart(
             send_operation,
             operation_id=f"upload_{task.task_id}",
             on_retry=on_retry,
-            on_failure=on_failure,
         )
         stats_action = "audio" if task.action == "audio" else "video"
         record_download_success(task.chat_id, action=stats_action, file_size_mb=file_size_mb)

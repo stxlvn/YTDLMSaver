@@ -102,6 +102,25 @@ def _ffmpeg_location() -> str | None:
     return str(Path(ffmpeg_path).parent)
 
 
+def _run_ffmpeg(cmd: list[str], timeout: int) -> bytes:
+    """Popen + communicate that actually kills ffmpeg on timeout.
+
+    communicate(timeout=...) raising TimeoutExpired leaves the child process
+    running - callers that let the exception propagate never reap it, so a
+    single slow/stuck conversion leaks an ffmpeg process for good.
+    """
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        _, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise
+    if process.returncode != 0:
+        raise RuntimeError(stderr.decode(errors="replace"))
+    return stderr
+
+
 def convert_to_gif_and_send(task, video_path, bot):
     gif_path = Path(video_path).with_suffix(".gif")
     temp_mp4 = None
@@ -131,11 +150,12 @@ def convert_to_gif_and_send(task, video_path, bot):
                 "aac",
                 str(temp_mp4),
             ]
-            process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            _, stderr = process.communicate(timeout=120)
-
-            if process.returncode != 0:
-                logger.error("FFmpeg error при конвертации в MP4: %s", stderr.decode())
+            try:
+                _run_ffmpeg(ffmpeg_cmd, timeout=120)
+            except subprocess.TimeoutExpired:
+                raise Exception("Не удалось подготовить видео для GIF: конвертация зависла.")
+            except RuntimeError as exc:
+                logger.error("FFmpeg error при конвертации в MP4: %s", exc)
                 raise Exception("Не удалось подготовить видео для GIF. Ошибка конвертации.")
 
             video_to_convert = str(temp_mp4)
@@ -149,11 +169,12 @@ def convert_to_gif_and_send(task, video_path, bot):
             "-y",
             str(gif_path),
         ]
-        process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        _, stderr = process.communicate(timeout=120)
-
-        if process.returncode != 0:
-            logger.error("FFmpeg error при создании GIF: %s", stderr.decode())
+        try:
+            _run_ffmpeg(ffmpeg_cmd, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise Exception("Не удалось создать GIF: конвертация зависла.")
+        except RuntimeError as exc:
+            logger.error("FFmpeg error при создании GIF: %s", exc)
             raise Exception("Не удалось создать GIF. Ошибка конвертации.")
 
         title = task.info.get("title") or "animation"

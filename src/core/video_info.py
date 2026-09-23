@@ -50,7 +50,12 @@ def fetch_video_info_result(url):
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "extract_flat": False,
+            # 'in_playlist': a playlist URL only needs id/title/uploader/duration
+            # per entry here (queue_playlist_downloads re-resolves each video at
+            # download time anyway) - extract_flat=False was fully extracting
+            # every entry up front, ~1.5s/video of extra requests for nothing.
+            # Doesn't affect a plain single-video URL (nothing to flatten).
+            "extract_flat": "in_playlist",
             "skip_download": True,
             "socket_timeout": 10,
             "retries": 2,

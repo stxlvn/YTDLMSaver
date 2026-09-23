@@ -9,6 +9,10 @@ from ..utils.i18n import i18n
 
 logger = logging.getLogger(__name__)
 
+# Без границы один плейлист-ссылка на тысячи видео сразу заливает всю очередь
+# и держит её часами при MAX_CONCURRENT_DOWNLOADS=1.
+MAX_PLAYLIST_ITEMS = 200
+
 
 # Универсальный фильтр для ЛЮБЫХ ссылок внутри Telegram
 def is_telegram_link(url: str) -> bool:
@@ -94,7 +98,7 @@ def queue_playlist_downloads(
     silent_mode: bool,
     message_thread_id: int | None = None,
 ) -> int:
-    playlist_entries = collect_playlist_entries(info)
+    playlist_entries = collect_playlist_entries(info)[:MAX_PLAYLIST_ITEMS]
     queued = 0
 
     for entry in playlist_entries:
@@ -158,6 +162,7 @@ def handle_group_download(url: str, chat_id: int, message_id: int, download_mana
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
+            "extract_flat": "in_playlist",
             "skip_download": True,
             "socket_timeout": 30,
             "retries": 2,
@@ -273,11 +278,10 @@ def extract_video_info(
                 if existing is None or (item.get("filesize") or 0) > (existing.get("filesize") or 0):
                     resolutions[height] = item
 
-        cache[user_message_id] = {
+        cache[(chat_id, user_message_id)] = {
             "url": url,
             "info": info,
             "resolutions": resolutions,
-            "chat_id": chat_id,
             "thread_id": message_thread_id,
         }
 
