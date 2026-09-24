@@ -32,6 +32,7 @@ from .media_assets import (
     download_and_send_tiktok_photos,
 )
 from .thumbnail import prepare_video_thumbnail
+from .tiktok_photo_handler import download_tiktok_video
 
 logger = logging.getLogger(__name__)
 
@@ -729,6 +730,33 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
             pass
 
 
+def _tiktok_fallback_or_raise(task, work_dir, exc: Exception):
+    # yt-dlp's TikTok extractor regularly hits TikTok's own anti-bot
+    # challenge and fails outright (no client/proxy combination on the
+    # yt-dlp side has fixed it) - TikWM (already used for TikTok photo
+    # posts) works fine through the same FI proxy, so fall back to it for
+    # video too rather than surfacing an error the user can't act on.
+    # Only for plain TikTok video actions - not audio/gif/etc, which need
+    # postprocessing TikWM's direct download doesn't go through.
+    if "tiktok.com" not in task.url.lower() or task.action not in {"best", "medium", "low", "res"}:
+        raise exc
+
+    logger.info("TikTok: yt-dlp упал (%s), пробую TikWM для task_id=%s", exc, task.task_id)
+    try:
+        file_path, meta = download_tiktok_video(task.url, work_dir)
+    except Exception as fallback_exc:
+        logger.warning("TikTok: TikWM fallback тоже не удался: %s", fallback_exc)
+        raise exc from fallback_exc
+
+    if not task.info.get("title"):
+        task.info["title"] = meta.get("title") or task.info.get("title")
+    if not task.info.get("duration"):
+        task.info["duration"] = meta.get("duration")
+    if not task.info.get("uploader"):
+        task.info["uploader"] = meta.get("uploader")
+    return file_path
+
+
 def _download_and_send_video(task, bot, temp_dir):
     part2 = ''
 
@@ -791,7 +819,10 @@ def _download_and_send_video(task, bot, temp_dir):
         raise RuntimeError("FFmpeg is not installed on server")
 
     variants = _get_download_variants(task, output_path)
-    file_path = _download_first_available_variant(task, bot, work_dir, variants)
+    try:
+        file_path = _download_first_available_variant(task, bot, work_dir, variants)
+    except Exception as exc:
+        file_path = _tiktok_fallback_or_raise(task, work_dir, exc)
 
     thumbnail_path = prepare_video_thumbnail(task, work_dir, file_path)
 

@@ -4,8 +4,16 @@ import subprocess
 
 import yt_dlp
 import config
+from .file_sender import probe_video_metadata
 
 logger = logging.getLogger(__name__)
+
+
+def _is_portrait(metadata: dict) -> bool | None:
+    width, height = metadata.get("width"), metadata.get("height")
+    if not width or not height:
+        return None
+    return height > width
 
 
 def prepare_video_thumbnail(task, work_dir, file_path) -> str | None:
@@ -60,26 +68,42 @@ def prepare_video_thumbnail(task, work_dir, file_path) -> str | None:
                 tg_thumb = work_dir / "tg_thumb.jpg"
                 with open(raw_thumb, 'wb') as f:
                     f.write(response.content)
-                try:
-                    subprocess.run([
-                        'ffmpeg', '-y', '-i', str(raw_thumb),
-                        '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
-                        '-q:v', '5', str(tg_thumb)
-                    ], check=True, capture_output=True)
-                    thumbnail_path = str(tg_thumb)
-                    task.thumbnail_path = thumbnail_path
+
+                video_portrait = _is_portrait(probe_video_metadata(file_path))
+                thumb_portrait = _is_portrait(probe_video_metadata(str(raw_thumb)))
+                if video_portrait is not None and thumb_portrait is not None and video_portrait != thumb_portrait:
+                    # YouTube отдаёт для Shorts обычный горизонтальный постер-кадр
+                    # 16:9 даже когда само видео 9:16 - Telegram тогда рисует
+                    # превью с чужими пропорциями. Отбрасываем такую обложку;
+                    # ниже сработает fallback на кадр из самого видео, который
+                    # гарантированно той же ориентации, что и отправляемый файл.
                     logger.info(
-                        f"Thumbnail: task_id={task.task_id} готово, resized -> {thumbnail_path} "
-                        f"({os.path.getsize(thumbnail_path)} байт)"
+                        f"Thumbnail: task_id={task.task_id} обложка не совпадает по ориентации с видео "
+                        "- беру кадр из самого файла вместо CDN-превью"
                     )
-                except Exception as resize_e:
-                    logger.warning(f"Thumbnail: task_id={task.task_id} ошибка ресайза обложки: {resize_e}")
-                    thumbnail_path = str(raw_thumb)
-                    task.thumbnail_path = thumbnail_path
-                    logger.info(
-                        f"Thumbnail: task_id={task.task_id} готово (без ресайза, raw) -> {thumbnail_path} "
-                        f"({os.path.getsize(thumbnail_path)} байт)"
-                    )
+                    raw_thumb.unlink(missing_ok=True)
+                    thumbnail_path = None
+                else:
+                    try:
+                        subprocess.run([
+                            'ffmpeg', '-y', '-i', str(raw_thumb),
+                            '-vf', 'scale=320:320:force_original_aspect_ratio=decrease',
+                            '-q:v', '5', str(tg_thumb)
+                        ], check=True, capture_output=True)
+                        thumbnail_path = str(tg_thumb)
+                        task.thumbnail_path = thumbnail_path
+                        logger.info(
+                            f"Thumbnail: task_id={task.task_id} готово, resized -> {thumbnail_path} "
+                            f"({os.path.getsize(thumbnail_path)} байт)"
+                        )
+                    except Exception as resize_e:
+                        logger.warning(f"Thumbnail: task_id={task.task_id} ошибка ресайза обложки: {resize_e}")
+                        thumbnail_path = str(raw_thumb)
+                        task.thumbnail_path = thumbnail_path
+                        logger.info(
+                            f"Thumbnail: task_id={task.task_id} готово (без ресайза, raw) -> {thumbnail_path} "
+                            f"({os.path.getsize(thumbnail_path)} байт)"
+                        )
     except Exception as e:
         logger.warning(f"Thumbnail: task_id={task.task_id} не удалось подготовить: {e}", exc_info=True)
 
