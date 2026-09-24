@@ -59,7 +59,7 @@ def _parse_ratio(value: str | None) -> float | None:
     return numerator_int / denominator_int
 
 
-def _probe_video_metadata(file_path: str) -> dict:
+def probe_video_metadata(file_path: str) -> dict:
     ffprobe_path = shutil.which("ffprobe")
     if not ffprobe_path:
         return {}
@@ -190,7 +190,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
     original_title = task.info.get("title") or task.info.get("id") or title or "video"
     file_size_bytes = os.path.getsize(file_path)
     file_size_mb = file_size_bytes / (1024 * 1024)
-    video_metadata = _probe_video_metadata(file_path) or _video_metadata_from_info(task.info)
+    video_metadata = probe_video_metadata(file_path) or _video_metadata_from_info(task.info)
 
     # result_holder - обычная локальная переменная замыкания, отдельная на
     # каждый вызов send_file_with_retry. В отличие от патчинга методов bot

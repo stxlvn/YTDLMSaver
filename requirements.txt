@@ -4,3 +4,4 @@ requests==2.34.2
 gallery-dl==1.32.13
 python-dotenv==1.2.3
 bgutil-ytdlp-pot-provider==2.0.0
+PySocks==1.7.1
