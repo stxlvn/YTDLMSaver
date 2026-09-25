@@ -145,6 +145,13 @@ def _clean_download_target(value: str) -> str:
                 )
             )
 
+    # axinstagram.com - сторонний "embed-fixer" зеркалящий Instagram по тем же
+    # путям (/p/, /reel/, /reels/, ...) с добавленным собственным ?stkn=
+    # токеном; ни yt-dlp, ни gallery-dl его не знают, поэтому переписываем на
+    # настоящий instagram.com, где всё уже работает через cookies.txt.
+    if host in {"axinstagram.com", "www.axinstagram.com"}:
+        return urlunsplit((parsed.scheme, "www.instagram.com", parsed.path, "", ""))
+
     return target
 
 
