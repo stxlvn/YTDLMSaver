@@ -1,7 +1,7 @@
 aiogram==3.31.0
 yt-dlp==2026.8.19
 requests==2.34.2
-gallery-dl==1.32.13
-python-dotenv==1.2.3
-bgutil-ytdlp-pot-provider==2.0.0
+gallery-dl==1.32.16
+python-dotenv==1.2.4
+bgutil-ytdlp-pot-provider==2.0.2
 PySocks==1.7.1
