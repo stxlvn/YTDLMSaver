@@ -8,7 +8,14 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichMessage,
+    Message,
+    ReplyParameters,
+)
 
 import config
 from ..core.user_stats import get_stats_manager
@@ -67,10 +74,12 @@ def _build_admin_panel_text(chat_id: int):
         ]), icon="🛠️", footer=i18n.get(chat_id, "admin_panel_footer")
     )
 
-def _build_global_stats_text(chat_id: int):
+def _build_global_stats_rich(chat_id: int) -> str:
+    # Пилот Rich Messages (Bot API 10.1+): реальная <table> вместо
+    # "• label: value" строк - см. core.telegram.org/bots/api#inputrichmessage.
     ui_manager = get_ui_manager()
     all_stats = get_stats_manager().get_all_stats()
-    
+
     total_users = len(all_stats)
     total_downloads = sum(item.downloads_count for item in all_stats.values())
     total_videos = sum(item.total_videos for item in all_stats.values())
@@ -85,7 +94,7 @@ def _build_global_stats_text(chat_id: int):
     attempts = total_downloads + total_failed
     success_rate = (total_downloads / attempts * 100) if attempts else 0
 
-    lines = ui_manager.format_key_value_list([
+    table = ui_manager.format_rich_table([
         (i18n.get(chat_id, "admin_stat_users"), str(total_users)),
         (i18n.get(chat_id, "admin_stat_active"), str(active_users)),
         (i18n.get(chat_id, "admin_stat_total"), str(total_downloads)),
@@ -98,15 +107,24 @@ def _build_global_stats_text(chat_id: int):
         (i18n.get(chat_id, "admin_stat_avg_size"), f"{avg_size:.2f} MB"),
         (i18n.get(chat_id, "admin_stat_avg_dl"), f"{avg_downloads:.1f}"),
     ])
-    lines.extend(["", i18n.get(chat_id, "admin_top_users")])
 
     top_users = sorted(all_stats.items(), key=lambda i: i[1].downloads_count, reverse=True)[:5]
-    if not top_users: lines.append(i18n.get(chat_id, "admin_no_users"))
+    if not top_users:
+        top_block = f"<p>{i18n.get(chat_id, 'admin_no_users')}</p>"
     else:
-        for idx, (uid, stats) in enumerate(top_users, 1):
-            lines.append(f"{idx}. ID {uid}: {i18n.get(chat_id, 'admin_dl_count', c=stats.downloads_count)}")
+        items = "".join(
+            f"<li>ID {uid}: {i18n.get(chat_id, 'admin_dl_count', c=stats.downloads_count)}</li>"
+            for uid, stats in top_users
+        )
+        top_block = f"<ol>{items}</ol>"
 
-    return ui_manager.format_panel(i18n.get(chat_id, "admin_btn_stats").replace('📊 ', ''), lines, icon="📊")
+    title = i18n.get(chat_id, "admin_btn_stats").replace('📊 ', '')
+    return (
+        f"<h3>📊 {title}</h3>"
+        f"{table}"
+        f"<h3>{i18n.get(chat_id, 'admin_top_users')}</h3>"
+        f"{top_block}"
+    )
 
 def _build_user_list_text(chat_id: int):
     ui_manager = get_ui_manager()
@@ -251,13 +269,17 @@ def register_admin_handlers(router: Router):
 
     async def stats_global_command(message: Message):
         if not message.from_user or not is_admin(message.from_user.id): return
-        await message.reply(_build_global_stats_text(message.chat.id), parse_mode="HTML")
+        rich = InputRichMessage(html=_build_global_stats_rich(message.chat.id))
+        await message.bot.send_rich_message(
+            message.chat.id, rich, reply_parameters=ReplyParameters(message_id=message.message_id)
+        )
 
     async def callback_admin_stats_global(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await call.answer()
-        await call.message.edit_text(_build_global_stats_text(chat_id), reply_markup=_build_back_keyboard(chat_id), parse_mode="HTML")
+        rich = InputRichMessage(html=_build_global_stats_rich(chat_id))
+        await call.message.edit_text(rich_message=rich, reply_markup=_build_back_keyboard(chat_id))
 
     async def callback_admin_broadcast(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return

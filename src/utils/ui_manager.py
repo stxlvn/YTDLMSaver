@@ -43,6 +43,42 @@ class UIManager:
             lines.append(f"• {label}: {value}")
         return lines
 
+    def format_rich_panel(
+        self,
+        title: str,
+        lines: list[str] | None = None,
+        *,
+        icon: str | None = None,
+        footer: str | None = None,
+    ) -> str:
+        # HTML для Rich Messages (Bot API 10.1+, sendRichMessage /
+        # editMessageText(rich_message=...)) - заголовок становится настоящим
+        # <h3> блоком, а не жирным текстом поверх обычного sendMessage.
+        # Как и format_panel, не экранирует - вызывающий код должен сам
+        # экранировать динамические данные (html.escape), если они есть.
+        header = f"{icon} {title}" if icon else title
+        parts = [f"<h3>{header}</h3>"]
+        for line in lines or []:
+            if line == "":
+                continue
+            parts.append(f"<p>{line}</p>")
+        if footer:
+            parts.append(f"<footer>{footer}</footer>")
+        return "".join(parts)
+
+    def format_rich_table(
+        self,
+        items: list[tuple[str, str]],
+        *,
+        header: tuple[str, str] | None = None,
+    ) -> str:
+        rows = []
+        if header:
+            rows.append(f"<tr><th>{header[0]}</th><th>{header[1]}</th></tr>")
+        for label, value in items:
+            rows.append(f"<tr><td>{label}</td><td>{value}</td></tr>")
+        return f"<table>{''.join(rows)}</table>"
+
     def create_progress_bar(
         self,
         progress: float,

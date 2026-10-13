@@ -6,7 +6,14 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram import Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichMessage,
+    Message,
+    ReplyParameters,
+)
 from .download_processing import extract_video_info as _extract_video_info, handle_group_download as _handle_group_download
 from ..utils.ui_manager import get_ui_manager
 from ..utils.i18n import i18n
@@ -272,7 +279,16 @@ def register_download_handlers(router: Router, sync_bot):
         thread_id = _topic_id(message)
         if not url:
             if message.chat.type == "private":
-                await message.reply(ui_manager.format_panel(i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"), parse_mode="HTML")
+                # Пилот Rich Messages (Bot API 10.1+, см. core.telegram.org/bots/api#inputrichmessage):
+                # sendRichMessage - отдельный метод, не parse_mode у обычного send_message.
+                rich = InputRichMessage(
+                    html=ui_manager.format_rich_panel(
+                        i18n.get(chat_id, "err_url_title"), [i18n.get(chat_id, "err_url_desc")], icon="🔗"
+                    )
+                )
+                await message.bot.send_rich_message(
+                    chat_id, rich, reply_parameters=ReplyParameters(message_id=message.message_id)
+                )
             return
 
         is_ig = "instagram.com/p/" in url.lower()
