@@ -47,7 +47,13 @@ def _tikwm_lookup(url: str) -> dict:
     response = requests.post(
         TIKWM_API_URL, data={"url": url, "hd": 1}, timeout=20, proxies=_tikwm_proxies()
     )
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError:
+        # Нестабильность самого tikwm.com (например, пустой ответ или HTML
+        # вместо JSON под нагрузкой/WAF-блоком) - без этого голый
+        # JSONDecodeError без статуса и тела ничего не говорит в логах.
+        raise ValueError(f"TikWM вернул не-JSON ответ (HTTP {response.status_code})")
     if data.get("code") != 0 or "data" not in data:
         msg = data.get("msg", "Неизвестная ошибка API")
         logger.error(f"TikWM API Error: {msg}")

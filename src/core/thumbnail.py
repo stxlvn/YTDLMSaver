@@ -38,7 +38,11 @@ def prepare_video_thumbnail(task, work_dir, file_path) -> str | None:
         logger.info(
             f"Thumbnail: task_id={task.task_id} thumbnail из task.info={thumbnail_url!r}"
         )
-        if not thumbnail_url:
+        if not thumbnail_url and "tiktok.com" not in task.url.lower():
+            # Для TikTok этот повторный запрос почти всегда упирается в
+            # антибот-челлендж yt-dlp'шного экстрактора (см. _tiktok_fallback_or_raise) -
+            # не тратим время и не засоряем лог полным traceback на каждое видео,
+            # сразу уходим на fallback (кадр из уже скачанного файла).
             with yt_dlp.YoutubeDL({
                 'quiet': True,
                 'no_warnings': True,

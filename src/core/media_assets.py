@@ -37,7 +37,12 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
         )
 
     photo_paths = download_tiktok_photos(task.url, work_dir)
-    caption = MessageTemplate.format_tiktok_photo_caption(task.url, len(photo_paths))
+    clean_url = task.url.split('?')[0]
+    caption = MessageTemplate.format_caption(
+        task.info.get("title", ""), clean_url, "tiktok_photo",
+        chat_id=task.chat_id, description=task.info.get("description"),
+    )
+    caption, overflow = MessageTemplate.split_caption(caption, 1024)
     total_size = sum(path.stat().st_size for path in photo_paths)
 
     if len(photo_paths) == 1:
@@ -82,6 +87,12 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
                 message_thread_id=task.message_thread_id,
                 timeout=180,
             )
+
+    if overflow:
+        try:
+            bot.send_message(task.chat_id, text=overflow, parse_mode="HTML", message_thread_id=task.message_thread_id)
+        except Exception:
+            pass
 
     record_download_success(
         task.chat_id,
