@@ -33,14 +33,13 @@ def _format_duration(seconds) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def _safe_edit_message_text(bot, text: str, chat_id: int, message_id: int, **kwargs) -> bool:
-    kwargs.setdefault("parse_mode", "HTML")
+def _safe_edit_rich_message_text(bot, html_content: str, chat_id: int, message_id: int, **kwargs) -> bool:
     try:
-        bot.edit_message_text(text, chat_id, message_id, **kwargs)
+        bot.edit_rich_message_text(html_content, chat_id, message_id, **kwargs)
         return True
     except Exception as exc:
         logger.warning(
-            "Не удалось обновить сообщение статуса chat_id=%s message_id=%s: %s",
+            "Не удалось обновить сообщение статуса (rich) chat_id=%s message_id=%s: %s",
             chat_id,
             message_id,
             exc,
@@ -58,7 +57,7 @@ def _build_info_error_text(error: str | None) -> str:
         or "cookies" in error_text
         or "not accessible" in error_text
     ):
-        return ui_manager.format_panel(
+        return ui_manager.format_rich_panel(
             "Instagram ограничил доступ",
             [
                 "Не удалось получить медиа без актуальных cookies.",
@@ -68,20 +67,20 @@ def _build_info_error_text(error: str | None) -> str:
         )
 
     if "private" in error_text:
-        return ui_manager.format_panel(
+        return ui_manager.format_rich_panel(
             "Приватное видео",
             ["У бота нет доступа к этому видео."],
             icon="❌",
         )
 
     if "unsupported url" in error_text or "not a valid url" in error_text:
-        return ui_manager.format_panel(
+        return ui_manager.format_rich_panel(
             "Ссылка не поддерживается",
             ["Отправьте прямую ссылку на видео с поддерживаемой платформы."],
             icon="❌",
         )
 
-    return ui_manager.format_panel(
+    return ui_manager.format_rich_panel(
         "Не удалось прочитать ссылку",
         ["Проверьте доступность видео и отправьте ссылку еще раз."],
         icon="❌",
@@ -125,11 +124,10 @@ def queue_playlist_downloads(
 def build_playlist_queued_text(info: dict, queued_count: int) -> str:
     ui_manager = get_ui_manager()
     playlist_title = html.escape(info.get("title") or "Плейлист")
-    return ui_manager.format_panel(
+    return ui_manager.format_rich_panel(
         playlist_title,
         [
             f"Видео в очереди: {queued_count} · качество максимальное доступное",
-            "",
             "Файлы будут приходить по мере готовности.",
         ],
         icon="🎶",
@@ -233,7 +231,7 @@ def extract_video_info(
 
         info, info_error = fetch_video_info_result(url)
         if not info:
-            _safe_edit_message_text(
+            _safe_edit_rich_message_text(
                 bot,
                 _build_info_error_text(info_error),
                 chat_id,
@@ -254,15 +252,15 @@ def extract_video_info(
             )
 
             if queued_count == 0:
-                _safe_edit_message_text(
+                _safe_edit_rich_message_text(
                     bot,
-                    "🎶 Не удалось извлечь элементы плейлиста.",
+                    "<p>🎶 Не удалось извлечь элементы плейлиста.</p>",
                     chat_id,
                     status_message_id,
                 )
                 return
 
-            _safe_edit_message_text(
+            _safe_edit_rich_message_text(
                 bot,
                 build_playlist_queued_text(info, queued_count),
                 chat_id,
@@ -289,9 +287,9 @@ def extract_video_info(
         title = html.escape(info.get('title') or 'video')
         meta_parts = [part for part in (_format_duration(info.get('duration')), info.get('extractor_key')) if part]
         meta_line = html.escape(" · ".join(meta_parts)) if meta_parts else i18n.get(chat_id, "status_found_desc")
-        _safe_edit_message_text(
+        _safe_edit_rich_message_text(
             bot,
-            ui_manager.format_panel(title, [meta_line]),
+            ui_manager.format_rich_panel(title, [meta_line]),
             chat_id,
             status_message_id,
             reply_markup=markup,
@@ -302,9 +300,9 @@ def extract_video_info(
             try: bot.delete_message(chat_id, status_message_id)
             except Exception: pass
         else:
-            _safe_edit_message_text(
+            _safe_edit_rich_message_text(
                 bot,
-                ui_manager.format_panel(i18n.get(chat_id, "status_processing_err"), [html.escape(error_text)], icon="❌"),
+                ui_manager.format_rich_panel(i18n.get(chat_id, "status_processing_err"), [html.escape(error_text)], icon="❌"),
                 chat_id,
                 status_message_id,
             )

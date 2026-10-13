@@ -12,6 +12,7 @@ from aiogram import Bot
 from aiogram.types import (
     BufferedInputFile,
     FSInputFile,
+    InputRichMessage,
     ReplyParameters,
 )
 from aiogram.types.input_file import DEFAULT_CHUNK_SIZE
@@ -201,6 +202,23 @@ class AiogramSyncBotAdapter:
         return self._call(
             self.bot.edit_message_text(
                 text=text,
+                chat_id=chat_id,
+                message_id=message_id,
+                **payload,
+            )
+        )
+
+    def send_rich_message(self, chat_id, html, **kwargs):
+        payload = self._normalize_kwargs(kwargs)
+        return self._call(
+            self.bot.send_rich_message(chat_id=chat_id, rich_message=InputRichMessage(html=html), **payload)
+        )
+
+    def edit_rich_message_text(self, html, chat_id, message_id, **kwargs):
+        payload = self._normalize_kwargs(kwargs)
+        return self._call(
+            self.bot.edit_message_text(
+                rich_message=InputRichMessage(html=html),
                 chat_id=chat_id,
                 message_id=message_id,
                 **payload,
