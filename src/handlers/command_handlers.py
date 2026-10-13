@@ -6,7 +6,14 @@ from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichMessage,
+    Message,
+    CallbackQuery,
+    ReplyParameters,
+)
 from ..core.download_support import format_file_size
 from ..core.user_stats import get_stats_manager
 from ..utils.ui_manager import get_ui_manager
@@ -25,19 +32,29 @@ def register_command_handlers(router: Router):
             logger.warning("Не удалось ответить на команду в чате %s: %s", m.chat.id, exc)
             return None
 
+    async def safe_reply_rich(m: Message, html_content: str, **kwargs):
+        rich = InputRichMessage(html=html_content)
+        try:
+            return await m.bot.send_rich_message(
+                m.chat.id, rich, reply_parameters=ReplyParameters(message_id=m.message_id), **kwargs
+            )
+        except (TelegramBadRequest, TelegramForbiddenError) as exc:
+            logger.warning("Не удалось ответить на команду (rich) в чате %s: %s", m.chat.id, exc)
+            return None
+
     async def send_welcome(m: Message, state: FSMContext):
         await state.clear()
         chat_id = m.chat.id
         text_lines = i18n.get(chat_id, "menu_welcome").split("\n")
         footer_text = i18n.get(chat_id, "menu_footer")
-        await safe_reply(m, ui_manager.format_panel("YTDLMSaver", text_lines, footer=footer_text))
+        await safe_reply_rich(m, ui_manager.format_rich_panel("YTDLMSaver", text_lines, footer=footer_text))
 
     async def help_command(m: Message, state: FSMContext):
         await state.clear()
         chat_id = m.chat.id
         text_lines = i18n.get(chat_id, "menu_help").split("\n")
         faq_title = i18n.get(chat_id, "menu_faq")
-        await safe_reply(m, ui_manager.format_panel(faq_title, text_lines, icon="📖"))
+        await safe_reply_rich(m, ui_manager.format_rich_panel(faq_title, text_lines, icon="📖"))
 
     async def lang_command(m: Message, state: FSMContext):
         await state.clear()
@@ -69,7 +86,7 @@ def register_command_handlers(router: Router):
         with manager.lock:
             user_tasks = {tid: t for tid, t in manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
         if not user_tasks:
-            return await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_no_downloads"), [i18n.get(chat_id, "status_no_downloads_desc")], icon="✅"))
+            return await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_no_downloads"), [i18n.get(chat_id, "status_no_downloads_desc")], icon="✅"))
         lines = []
         for t in user_tasks.values():
             title = html.escape(t.info.get('title') or 'Video')
@@ -91,7 +108,7 @@ def register_command_handlers(router: Router):
                 lines.append(i18n.get(chat_id, 'status_queue'))
             lines.append("")
         kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads")]])
-        await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)
+        await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)
 
     async def cancel_download(m: Message, state: FSMContext):
         await state.clear()
@@ -103,40 +120,43 @@ def register_command_handlers(router: Router):
         with manager.lock:
             user_tasks = {tid: t for tid, t in manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
         if not user_tasks:
-            return await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_nothing_to_cancel"), [i18n.get(chat_id, "status_no_active")], icon="⏳"))
+            return await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_nothing_to_cancel"), [i18n.get(chat_id, "status_no_active")], icon="⏳"))
         cc = sum(1 for tid in user_tasks if manager.cancel_task(tid))
-        await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅"))
+        await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_cancelled"), [i18n.get(chat_id, "status_cancelled_count", count=cc), i18n.get(chat_id, "status_can_start_new")], icon="✅"))
 
     async def stats_command(m: Message, state: FSMContext):
         await state.clear()
         chat_id = m.chat.id
         stats = get_stats_manager().get_user_stats(chat_id)
-        lines = []
+        title = i18n.get(chat_id, "menu_stats")
         if stats.downloads_count == 0:
-            lines.append(i18n.get(chat_id, "stats_no_dl"))
-        else:
-            lines.extend(ui_manager.format_key_value_list([
-                (i18n.get(chat_id, "stats_dl_count"), str(stats.downloads_count)),
-                (i18n.get(chat_id, "stats_videos"), str(stats.total_videos)),
-                (i18n.get(chat_id, "stats_size"), f"{stats.total_size_mb:.1f} MB")
-            ]))
-            if stats.total_audios:
-                lines.append(f"• Аудио: {stats.total_audios}")
-            if stats.total_other_downloads:
-                lines.append(f"• Прочее: {stats.total_other_downloads}")
-            if stats.failed_downloads:
-                lines.append(f"• Ошибок загрузок: {stats.failed_downloads}")
-            if stats.first_download_date:
-                first_date = datetime.fromisoformat(stats.first_download_date)
-                lines.append(f"• Первая загрузка: {first_date.strftime('%d.%m.%Y %H:%M')}")
-            if stats.last_download_date:
-                last_date = datetime.fromisoformat(stats.last_download_date)
-                lines.append(f"• Последняя загрузка: {last_date.strftime('%d.%m.%Y %H:%M')}")
-            total_attempts = stats.downloads_count + stats.failed_downloads
-            if total_attempts > 0:
-                success_rate = (stats.downloads_count / total_attempts) * 100
-                lines.append(f"• Успешные загрузки: {success_rate:.1f}%")
-        await safe_reply(m, ui_manager.format_panel(i18n.get(chat_id, "menu_stats"), lines, icon="📊"))
+            await safe_reply_rich(m, ui_manager.format_rich_panel(title, [i18n.get(chat_id, "stats_no_dl")], icon="📊"))
+            return
+
+        rows = [
+            (i18n.get(chat_id, "stats_dl_count"), str(stats.downloads_count)),
+            (i18n.get(chat_id, "stats_videos"), str(stats.total_videos)),
+            (i18n.get(chat_id, "stats_size"), f"{stats.total_size_mb:.1f} MB"),
+        ]
+        if stats.total_audios:
+            rows.append(("Аудио", str(stats.total_audios)))
+        if stats.total_other_downloads:
+            rows.append(("Прочее", str(stats.total_other_downloads)))
+        if stats.failed_downloads:
+            rows.append(("Ошибок загрузок", str(stats.failed_downloads)))
+        if stats.first_download_date:
+            first_date = datetime.fromisoformat(stats.first_download_date)
+            rows.append(("Первая загрузка", first_date.strftime('%d.%m.%Y %H:%M')))
+        if stats.last_download_date:
+            last_date = datetime.fromisoformat(stats.last_download_date)
+            rows.append(("Последняя загрузка", last_date.strftime('%d.%m.%Y %H:%M')))
+        total_attempts = stats.downloads_count + stats.failed_downloads
+        if total_attempts > 0:
+            success_rate = (stats.downloads_count / total_attempts) * 100
+            rows.append(("Успешные загрузки", f"{success_rate:.1f}%"))
+
+        html_content = f"<h3>📊 {title}</h3>{ui_manager.format_rich_table(rows)}"
+        await safe_reply_rich(m, html_content)
 
     router.message.register(send_welcome, CommandStart())
     router.message.register(help_command, Command("help"))
