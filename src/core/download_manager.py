@@ -191,15 +191,14 @@ class DownloadManager:
                                 lines.append("")
                                 lines.append(i18n.get(task.chat_id, "status_send_after_process"))
 
-                            self.bot.edit_message_text(
-                                ui_manager.format_panel(
+                            self.bot.edit_rich_message_text(
+                                ui_manager.format_rich_panel(
                                     title,
                                     lines,
                                     icon=stage_icon,
                                 ),
                                 task.chat_id,
                                 task.message_id,
-                                parse_mode="HTML",
                             )
                     except Exception as exc:
                         logger.debug("Ошибка при обновлении статуса задачи %s: %s", task_id, exc)

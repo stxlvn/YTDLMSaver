@@ -1,6 +1,13 @@
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_rich_html(html_content: str) -> str:
+    return _HTML_TAG_RE.sub("", html_content)
 
 
 class TelegramBotWrapper:
@@ -14,6 +21,8 @@ class TelegramBotWrapper:
         self._original_send_document = bot.send_document
         self._original_send_audio = bot.send_audio
         self._original_send_animation = bot.send_animation
+        self._original_send_rich_message = bot.send_rich_message
+        self._original_edit_rich_message_text = bot.edit_rich_message_text
 
         self._wrap_methods()
 
@@ -26,6 +35,32 @@ class TelegramBotWrapper:
         self.bot.send_document = self._wrapped_send_document
         self.bot.send_audio = self._wrapped_send_audio
         self.bot.send_animation = self._wrapped_send_animation
+        self.bot.send_rich_message = self._wrapped_send_rich_message
+        self.bot.edit_rich_message_text = self._wrapped_edit_rich_message_text
+
+    def _wrapped_send_rich_message(self, chat_id, html, **kwargs):
+        # Rich Messages has no parse_mode to drop on a parse failure the way
+        # plain sendMessage does - the only fallback is plain text with the
+        # markup tags stripped, so a bad/unescaped dynamic value (error text,
+        # a title) still reaches the user instead of silently vanishing.
+        try:
+            return self._original_send_rich_message(chat_id, html, **kwargs)
+        except Exception as exc:
+            logger.warning("sendRichMessage упал (%s), повтор как обычный текст", exc)
+            retry_kwargs = kwargs.copy()
+            retry_kwargs.pop("parse_mode", None)
+            return self._original_send_message(chat_id, _strip_rich_html(html), **retry_kwargs)
+
+    def _wrapped_edit_rich_message_text(self, html, chat_id, message_id, **kwargs):
+        try:
+            return self._original_edit_rich_message_text(html, chat_id, message_id, **kwargs)
+        except Exception as exc:
+            logger.warning("editMessageText(rich_message=...) упал (%s), повтор как обычный текст", exc)
+            retry_kwargs = kwargs.copy()
+            retry_kwargs.pop("parse_mode", None)
+            return self._original_edit_message_text(
+                _strip_rich_html(html), chat_id, message_id, **retry_kwargs
+            )
 
     @staticmethod
     def _handle_parse_error(error, text):

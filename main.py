@@ -14,7 +14,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeChat
+from aiogram.types import BotCommand, BotCommandScopeChat, InputRichMessage
 
 from src.core.download_manager import DownloadManager
 from src.core.user_stats import get_stats_manager
@@ -111,9 +111,10 @@ async def setup_bot_commands(bot, BotCommand, BotCommandScopeChat):
 
 
 async def notify_admins_async(bot, text: str):
+    rich = InputRichMessage(html=f"<p>{text}</p>")
     for admin_id in config.ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, text)
+            await bot.send_rich_message(admin_id, rich)
         except Exception as exc:
             logger.error("Не удалось уведомить администратора %s: %s", admin_id, exc)
 

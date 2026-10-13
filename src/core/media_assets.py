@@ -30,8 +30,8 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
 
     work_dir = ensure_task_work_dir(task, temp_dir)
     if not task.silent_mode:
-        bot.edit_message_text(
-            "🖼️ Скачиваю фото из TikTok...",
+        bot.edit_rich_message_text(
+            "<p>🖼️ Скачиваю фото из TikTok...</p>",
             task.chat_id,
             task.message_id,
         )
@@ -90,7 +90,7 @@ def download_and_send_tiktok_photos(task, bot, temp_dir):
 
     if overflow:
         try:
-            bot.send_message(task.chat_id, text=overflow, parse_mode="HTML", message_thread_id=task.message_thread_id)
+            bot.send_rich_message(task.chat_id, f"<p>{overflow}</p>", message_thread_id=task.message_thread_id)
         except Exception:
             pass
 
@@ -139,8 +139,8 @@ def convert_to_gif_and_send(task, video_path, bot):
         if not shutil.which("ffmpeg"):
             raise RuntimeError("FFmpeg is not installed on server")
         if not task.silent_mode:
-            bot.edit_message_text(
-                "✨ Создаю GIF-анимацию... Это может занять до минуты. 🧙‍♂️",
+            bot.edit_rich_message_text(
+                "<p>✨ Создаю GIF-анимацию... Это может занять до минуты. 🧙‍♂️</p>",
                 task.chat_id,
                 task.message_id,
             )
@@ -218,7 +218,7 @@ def convert_to_gif_and_send(task, video_path, bot):
 def download_and_send_subtitles(task, bot, temp_dir):
     try:
         if not task.silent_mode:
-            bot.edit_message_text("📝 Ищу и скачиваю субтитры...", task.chat_id, task.message_id)
+            bot.edit_rich_message_text("<p>📝 Ищу и скачиваю субтитры...</p>", task.chat_id, task.message_id)
 
         original_title = task.info.get("title") or "video"
         work_dir = ensure_task_work_dir(task, temp_dir)
@@ -231,7 +231,7 @@ def download_and_send_subtitles(task, bot, temp_dir):
             logger.info("Видео %s не имеет субтитров", task.url)
             if not task.silent_mode:
                 try:
-                    bot.edit_message_text(error_msg, task.chat_id, task.message_id)
+                    bot.edit_rich_message_text(f"<p>{error_msg}</p>", task.chat_id, task.message_id)
                 except Exception:
                     pass
             task.error = "Субтитры не найдены"
@@ -273,8 +273,8 @@ def download_and_send_subtitles(task, bot, temp_dir):
             def on_retry(attempt, delay):
                 if not task.silent_mode:
                     try:
-                        bot.edit_message_text(
-                            f"📝 Ошибка при скачивании субтитров, попытка {attempt}...",
+                        bot.edit_rich_message_text(
+                            f"<p>📝 Ошибка при скачивании субтитров, попытка {attempt}...</p>",
                             task.chat_id,
                             task.message_id,
                         )
@@ -289,8 +289,8 @@ def download_and_send_subtitles(task, bot, temp_dir):
                 )
 
             if not task.silent_mode:
-                bot.edit_message_text(
-                    f"📝 Скачиваю субтитры (языки: {', '.join(langs)})...",
+                bot.edit_rich_message_text(
+                    f"<p>📝 Скачиваю субтитры (языки: {', '.join(langs)})...</p>",
                     task.chat_id,
                     task.message_id,
                 )
@@ -309,8 +309,8 @@ def download_and_send_subtitles(task, bot, temp_dir):
                 if "429" in str(exc) or "too many requests" in str(exc).lower():
                     if not task.silent_mode:
                         try:
-                            bot.edit_message_text(
-                                "📝 Слишком много запросов — пробуем ещё через немного...",
+                            bot.edit_rich_message_text(
+                                "<p>📝 Слишком много запросов — пробуем ещё через немного...</p>",
                                 task.chat_id,
                                 task.message_id,
                             )
@@ -324,8 +324,8 @@ def download_and_send_subtitles(task, bot, temp_dir):
             logger.error("Не удалось скачать субтитры после всех попыток")
             if not task.silent_mode:
                 try:
-                    bot.edit_message_text(
-                        "❌ Не удалось скачать субтитры. Попробуйте позже.",
+                    bot.edit_rich_message_text(
+                        "<p>❌ Не удалось скачать субтитры. Попробуйте позже.</p>",
                         task.chat_id,
                         task.message_id,
                     )
@@ -345,7 +345,7 @@ def download_and_send_subtitles(task, bot, temp_dir):
             )
             if not task.silent_mode:
                 try:
-                    bot.edit_message_text(error_msg, task.chat_id, task.message_id)
+                    bot.edit_rich_message_text(f"<p>{error_msg}</p>", task.chat_id, task.message_id)
                 except Exception:
                     pass
             task.error = "Субтитры не найдены"
@@ -379,7 +379,7 @@ def download_and_send_subtitles(task, bot, temp_dir):
 
             error_text = ErrorMessages.format_error_with_suggestion(str(exc))
             try:
-                bot.edit_message_text(error_text, task.chat_id, task.message_id)
+                bot.edit_rich_message_text(f"<p>{error_text}</p>", task.chat_id, task.message_id)
             except Exception:
                 pass
         raise
@@ -393,8 +393,8 @@ def download_and_send_thumbnail(task, bot, temp_dir):
             raise ValueError("Превью для этого видео недоступно")
 
         if not task.silent_mode:
-            bot.edit_message_text(
-                "🖼️ Скачиваю превью видео в максимальном качестве...",
+            bot.edit_rich_message_text(
+                "<p>🖼️ Скачиваю превью видео в максимальном качестве...</p>",
                 task.chat_id,
                 task.message_id,
             )
@@ -450,8 +450,8 @@ def download_and_send_thumbnail(task, bot, temp_dir):
 
         size_str = format_file_size(file_size)
         if not task.silent_mode:
-            bot.edit_message_text(
-                f"📤 Готово! Отправляю превью ({size_str})...",
+            bot.edit_rich_message_text(
+                f"<p>📤 Готово! Отправляю превью ({size_str})...</p>",
                 task.chat_id,
                 task.message_id,
             )
@@ -485,7 +485,7 @@ def download_and_send_thumbnail(task, bot, temp_dir):
 
             error_text = ErrorMessages.format_error_with_suggestion(str(exc))
             try:
-                bot.edit_message_text(error_text, task.chat_id, task.message_id)
+                bot.edit_rich_message_text(f"<p>{error_text}</p>", task.chat_id, task.message_id)
             except Exception:
                 pass
         raise

@@ -24,14 +24,6 @@ logger = logging.getLogger(__name__)
 def register_command_handlers(router: Router):
     ui_manager = get_ui_manager()
 
-    async def safe_reply(m: Message, text: str, **kwargs):
-        kwargs.setdefault("parse_mode", "HTML")
-        try:
-            return await m.reply(text, **kwargs)
-        except (TelegramBadRequest, TelegramForbiddenError) as exc:
-            logger.warning("Не удалось ответить на команду в чате %s: %s", m.chat.id, exc)
-            return None
-
     async def safe_reply_rich(m: Message, html_content: str, **kwargs):
         rich = InputRichMessage(html=html_content)
         try:
@@ -64,7 +56,7 @@ def register_command_handlers(router: Router):
             lang_name = strings.get("_lang_name", f"🌍 {lang_code.upper()}")
             buttons.append([InlineKeyboardButton(text=lang_name, callback_data=f"setlang_{lang_code}")])
         kbd = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await safe_reply(m, i18n.get(chat_id, "menu_lang"), reply_markup=kbd)
+        await safe_reply_rich(m, f"<p>{i18n.get(chat_id, 'menu_lang')}</p>", reply_markup=kbd)
 
     async def lang_callback(c: CallbackQuery):
         uid = c.from_user.id
@@ -73,7 +65,7 @@ def register_command_handlers(router: Router):
         i18n.set_lang(uid, lang)
         if uid != chat_id:
             i18n.set_lang(chat_id, lang)
-        await c.message.edit_text(i18n.get(chat_id, "lang_changed"), parse_mode="HTML")
+        await c.message.edit_text(rich_message=InputRichMessage(html=f"<p>{i18n.get(chat_id, 'lang_changed')}</p>"))
         await c.answer()
 
     async def status_command(m: Message, state: FSMContext):
@@ -82,7 +74,7 @@ def register_command_handlers(router: Router):
         manager = get_download_manager()
         chat_id = m.chat.id
         if not manager:
-            return await safe_reply(m, i18n.get(chat_id, "status_manager_starting"))
+            return await safe_reply_rich(m, f"<p>{i18n.get(chat_id, 'status_manager_starting')}</p>")
         with manager.lock:
             user_tasks = {tid: t for tid, t in manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
         if not user_tasks:
@@ -116,7 +108,7 @@ def register_command_handlers(router: Router):
         manager = get_download_manager()
         chat_id = m.chat.id
         if not manager:
-            return await safe_reply(m, i18n.get(chat_id, "status_manager_starting"))
+            return await safe_reply_rich(m, f"<p>{i18n.get(chat_id, 'status_manager_starting')}</p>")
         with manager.lock:
             user_tasks = {tid: t for tid, t in manager.tasks.items() if t.chat_id == chat_id and t.status in {"downloading", "pending"}}
         if not user_tasks:

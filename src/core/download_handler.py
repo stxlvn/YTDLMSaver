@@ -407,7 +407,7 @@ def _download_first_available_variant(task, bot, work_dir, variants: list["Downl
             if index > 1:
                 status_text = f"⏬ Высокое качество не прошло, пробую {variant.label}..."
             try:
-                bot.edit_message_text(status_text, task.chat_id, task.message_id)
+                bot.edit_rich_message_text(f"<p>{status_text}</p>", task.chat_id, task.message_id)
             except Exception:
                 pass
 
@@ -604,7 +604,7 @@ def handle_download_task(task, bot, temp_dir):
 
             if not task.silent_mode:
                 try:
-                    bot.edit_message_text(user_message, task.chat_id, task.message_id)
+                    bot.edit_rich_message_text(f"<p>{user_message}</p>", task.chat_id, task.message_id)
                 except Exception:
                     pass
             task.error = str(exc)
@@ -630,7 +630,7 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
 
     if not task.silent_mode:
         try:
-            bot.edit_message_text(i18n.get(task.chat_id, "status_ig"), task.chat_id, task.message_id)
+            bot.edit_rich_message_text(f"<p>{i18n.get(task.chat_id, 'status_ig')}</p>", task.chat_id, task.message_id)
         except Exception:
             pass
 
@@ -678,7 +678,7 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
 
     if not task.silent_mode:
         try:
-            bot.edit_message_text(i18n.get(task.chat_id, "status_send_pic"), task.chat_id, task.message_id)
+            bot.edit_rich_message_text(f"<p>{i18n.get(task.chat_id, 'status_send_pic')}</p>", task.chat_id, task.message_id)
         except Exception:
             pass
 
@@ -720,7 +720,7 @@ def _download_and_send_instagram_photos(task, bot, temp_dir):
         raise
 
     if part2:
-        try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML', message_thread_id=task.message_thread_id)
+        try: bot.send_rich_message(task.chat_id, f"<p>{part2}</p>", message_thread_id=task.message_thread_id)
         except Exception: pass
 
     if not task.silent_mode:
@@ -774,7 +774,7 @@ def _download_and_send_video(task, bot, temp_dir):
         if file_id:
             if not task.silent_mode:
                 try:
-                    bot.edit_message_text(i18n.get(task.chat_id, "status_cache"), task.chat_id, task.message_id)
+                    bot.edit_rich_message_text(f"<p>{i18n.get(task.chat_id, 'status_cache')}</p>", task.chat_id, task.message_id)
                 except Exception:
                     pass
             try:
@@ -797,7 +797,7 @@ def _download_and_send_video(task, bot, temp_dir):
                 else:
                     bot.send_document(task.chat_id, file_id, caption=part1, parse_mode='HTML', message_thread_id=task.message_thread_id)
                 if part2:
-                    try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML', message_thread_id=task.message_thread_id)
+                    try: bot.send_rich_message(task.chat_id, f"<p>{part2}</p>", message_thread_id=task.message_thread_id)
                     except Exception: pass
                 if not task.silent_mode:
                     try:
@@ -840,7 +840,7 @@ def _download_and_send_video(task, bot, temp_dir):
         return
 
     if not task.silent_mode:
-        bot.edit_message_text(i18n.get(task.chat_id, "status_uploading"), task.chat_id, task.message_id)
+        bot.edit_rich_message_text(f"<p>{i18n.get(task.chat_id, 'status_uploading')}</p>", task.chat_id, task.message_id)
 
     # Не патчим bot.send_video/send_audio/send_document: bot - общий объект на
     # все воркер-треды DownloadManager, и мутация его методов "на время вызова"
@@ -862,7 +862,7 @@ def _download_and_send_video(task, bot, temp_dir):
         })
 
     if part2:
-        try: bot.send_message(task.chat_id, text=part2, parse_mode='HTML', message_thread_id=task.message_thread_id)
+        try: bot.send_rich_message(task.chat_id, f"<p>{part2}</p>", message_thread_id=task.message_thread_id)
         except Exception: pass
 
     if not task.silent_mode:

@@ -10,8 +10,9 @@ def notify_admins(bot, text: Optional[str]) -> None:
     if bot is None or not text:
         return
 
+    html_content = "".join(f"<p>{line}</p>" for line in text.split("\n") if line)
     for admin_id in config.ADMIN_IDS:
         try:
-            bot.send_message(admin_id, text)
+            bot.send_rich_message(admin_id, html_content)
         except Exception as exc:
             logger.error(f"Failed to notify admin {admin_id}: {exc}")

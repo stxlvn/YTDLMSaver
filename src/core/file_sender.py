@@ -337,9 +337,9 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
     def on_retry(attempt, delay):
         if not task.silent_mode:
             try:
-                bot.edit_message_text(
-                    f"📤 Отправка файла (попытка {attempt})...\n"
-                    f"⏱️ Ожидание {delay:.0f} сек",
+                bot.edit_rich_message_text(
+                    f"<p>📤 Отправка файла (попытка {attempt})...</p>"
+                    f"<p>⏱️ Ожидание {delay:.0f} сек</p>",
                     task.chat_id,
                     task.message_id,
                 )
