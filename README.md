@@ -214,4 +214,8 @@ CI (`.github/workflows/ci.yml`) на каждый push и PR: компиляци
 
 ---
 
-Форк [ReNothingg/ReSave](https://github.com/ReNothingg/ReSave). Лицензия — Apache-2.0.
+Изначально основан на [ReNothingg/ReSave](https://github.com/ReNothingg/ReSave),
+но с тех пор переписан практически полностью: очередь загрузок, cookieless
+YouTube через PO-токены, обход TikTok-антибота через TikWM, топики форума,
+локальный Bot API без лимита 50 МБ и так далее — общего с оригиналом почти не
+осталось. Лицензия — Apache-2.0.
