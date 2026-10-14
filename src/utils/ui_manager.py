@@ -78,6 +78,20 @@ class UIManager:
         inner = "".join(self.format_rich_button(**b) for b in buttons)
         return f"<tg-button-row{attrs}>{inner}</tg-button-row>"
 
+    def format_description_block(self, description: str | None, *, limit: int = 3500) -> str:
+        # Полное описание в одном <details> (Rich Messages, без лимита в
+        # 1024 символа у caption) - отдельным сообщением после файла, а не
+        # разрезанное split_caption на подпись+хвост.
+        if not description:
+            return ""
+        text = description.strip()
+        if len(text) > limit:
+            text = text[:limit].rsplit(" ", 1)[0] + "…"
+        lines = "".join(f"<p>{_html.escape(line)}</p>" for line in text.split("\n") if line.strip())
+        if not lines:
+            return ""
+        return f"<details><summary>📝 Описание</summary>{lines}</details>"
+
     def create_progress_bar(
         self,
         progress: float,

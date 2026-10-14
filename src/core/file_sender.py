@@ -239,12 +239,15 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             action="audio" if task.action == "audio" else "video",
             file_size=file_size_mb,
             chat_id=task.chat_id,
-            description=task.info.get("description"),
             quality=quality,
         )
         caption, caption_part2 = MessageTemplate.split_caption(caption_full, 1024)
         if caption_part2:
             result_holder['part2'] = caption_part2
+        # Полное описание уходит отдельным Rich-сообщением после файла
+        # (без лимита в 1024 символа у caption, см. format_description_block) -
+        # не режем split_caption-ом пополам между подписью и "хвостом".
+        result_holder['description'] = task.info.get("description")
 
         if task.action == "audio" and file_extension in audio_extensions:
             audio_kwargs = {}

@@ -15,6 +15,7 @@ import config
 from ..utils.admin_notifier import notify_admins
 from ..utils.file_utils import sanitize_filename
 from ..utils.i18n import i18n
+from ..utils.ui_manager import get_ui_manager
 from .access import build_file_size_limit_error
 from .download_support import (
     UserFacingError,
@@ -785,7 +786,7 @@ def _download_and_send_video(task, bot, temp_dir):
                     c_quality = "MP3 · 192 kbps"
                 else:
                     c_quality = f"{c_height}p · аудио включено" if c_height else None
-                c_caption = MessageTemplate.format_caption(c_title, getattr(task, "url", ""), getattr(task, "action", "video"), chat_id=task.chat_id, description=c_desc, quality=c_quality)
+                c_caption = MessageTemplate.format_caption(c_title, getattr(task, "url", ""), getattr(task, "action", "video"), chat_id=task.chat_id, quality=c_quality)
                 part1, part2 = MessageTemplate.split_caption(c_caption, 1024)
                 if media_type == "video":
                     kwargs = {'supports_streaming': True, 'caption': part1, 'parse_mode': 'HTML', 'message_thread_id': task.message_thread_id}
@@ -802,6 +803,10 @@ def _download_and_send_video(task, bot, temp_dir):
                     bot.send_document(task.chat_id, file_id, caption=part1, parse_mode='HTML', message_thread_id=task.message_thread_id)
                 if part2:
                     try: bot.send_rich_message(task.chat_id, f"<p>{part2}</p>", message_thread_id=task.message_thread_id)
+                    except Exception: pass
+                description_html = get_ui_manager().format_description_block(c_desc)
+                if description_html:
+                    try: bot.send_rich_message(task.chat_id, description_html, message_thread_id=task.message_thread_id)
                     except Exception: pass
                 if not task.silent_mode:
                     try:
@@ -867,6 +872,11 @@ def _download_and_send_video(task, bot, temp_dir):
 
     if part2:
         try: bot.send_rich_message(task.chat_id, f"<p>{part2}</p>", message_thread_id=task.message_thread_id)
+        except Exception: pass
+
+    description_html = get_ui_manager().format_description_block(captured_data.get('description'))
+    if description_html:
+        try: bot.send_rich_message(task.chat_id, description_html, message_thread_id=task.message_thread_id)
         except Exception: pass
 
     if not task.silent_mode:

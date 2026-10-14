@@ -33,20 +33,6 @@ def _format_duration(seconds) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def _build_description_details(description: str | None, *, limit: int = 1000) -> str:
-    # <details> без атрибута open = свёрнуто по умолчанию (Bot API 10.3+,
-    # см. core.telegram.org/bots/api#inputrichmessage, "Rich HTML style").
-    if not description:
-        return ""
-    text = description.strip()
-    if len(text) > limit:
-        text = text[:limit].rsplit(" ", 1)[0] + "…"
-    lines = "".join(f"<p>{html.escape(line)}</p>" for line in text.split("\n") if line.strip())
-    if not lines:
-        return ""
-    return f"<details><summary>📝 Описание</summary>{lines}</details>"
-
-
 def _safe_edit_rich_message_text(bot, html_content: str, chat_id: int, message_id: int, **kwargs) -> bool:
     try:
         bot.edit_rich_message_text(html_content, chat_id, message_id, **kwargs)
@@ -301,7 +287,7 @@ def extract_video_info(
         title = html.escape(info.get('title') or 'video')
         meta_parts = [part for part in (_format_duration(info.get('duration')), info.get('extractor_key')) if part]
         meta_line = html.escape(" · ".join(meta_parts)) if meta_parts else i18n.get(chat_id, "status_found_desc")
-        description_html = _build_description_details(info.get('description'))
+        description_html = ui_manager.format_description_block(info.get('description'))
         _safe_edit_rich_message_text(
             bot,
             ui_manager.format_rich_panel(title, [meta_line]) + description_html + buttons_html,
