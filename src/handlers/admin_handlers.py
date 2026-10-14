@@ -397,8 +397,13 @@ def register_admin_handlers(router: Router):
         try:
             await call.message.delete()
         except Exception:
-            html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕")
-            await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
+            # Сообщение может быть недоступно и для edit тоже (например,
+            # слишком старое) - тогда просто молча сдаёмся, не роняя хендлер.
+            try:
+                html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕")
+                await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
+            except Exception:
+                pass
 
     async def callback_admin_back(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return

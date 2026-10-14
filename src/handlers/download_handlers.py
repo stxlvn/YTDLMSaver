@@ -356,8 +356,13 @@ def register_download_handlers(router: Router, sync_bot):
             video_info_cache.pop((call.message.chat.id, int(call.data.rsplit("_", 1)[-1])), None)
         except (ValueError, AttributeError):
             pass
-        try: await call.message.delete()
-        except Exception: await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel("Отменено", icon="✕")))
+        try:
+            await call.message.delete()
+        except Exception:
+            try:
+                await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel("Отменено", icon="✕")))
+            except Exception:
+                pass
 
     router.message.register(process_url_message, StateFilter(None), lambda m: bool((m.text or m.caption) and not (m.text or m.caption or "").strip().startswith("/")))
     router.callback_query.register(handle_download, lambda c: bool(c.data and c.data.startswith("dl_")))
