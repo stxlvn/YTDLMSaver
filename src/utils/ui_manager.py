@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as _html
 from enum import Enum
 
 
@@ -48,6 +49,34 @@ class UIManager:
         for label, value in items:
             rows.append(f"<tr><td>{label}</td><td>{value}</td></tr>")
         return f"<table>{''.join(rows)}</table>"
+
+    def format_rich_button(
+        self,
+        text: str,
+        *,
+        callback_data: str | None = None,
+        url: str | None = None,
+        style: str | None = None,
+    ) -> str:
+        # <tg-button> (Bot API 10.3+, см. core.telegram.org/bots/api#inputrichmessage,
+        # раздел "Rich HTML style"): кнопки живут прямо в теле сообщения, а не
+        # отдельной клавиатурой через reply_markup. callback_data уходит в
+        # атрибут data= (не callback_data=) - так его парсит сервер.
+        if callback_data is not None:
+            attrs = f'type="callback_data" data="{_html.escape(callback_data, quote=True)}"'
+        elif url is not None:
+            attrs = f'type="url" url="{_html.escape(url, quote=True)}"'
+        else:
+            raise ValueError("format_rich_button: нужен callback_data или url")
+        if style:
+            attrs += f' style="{style}"'
+        return f"<tg-button {attrs}>{_html.escape(text)}</tg-button>"
+
+    def format_rich_button_row(self, buttons: list[dict], *, align: str | None = None) -> str:
+        """buttons: [{'text':..., 'callback_data' или 'url':..., 'style':...}, ...] - одна строка кнопок (до 8)."""
+        attrs = f' align="{align}"' if align else ""
+        inner = "".join(self.format_rich_button(**b) for b in buttons)
+        return f"<tg-button-row{attrs}>{inner}</tg-button-row>"
 
     def create_progress_bar(
         self,

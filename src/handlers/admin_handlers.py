@@ -10,8 +10,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     InputRichMessage,
     Message,
     ReplyParameters,
@@ -37,19 +35,33 @@ class BroadcastPayload:
     entities: list | None = None
     caption_entities: list | None = None
 
-def _build_admin_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_stats"), callback_data="admin_stats_global", style="primary"),
-         InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_bc"), callback_data="admin_broadcast", style="primary")],
-        [InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_users"), callback_data="admin_user_list", style="primary"),
-         InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_clear"), callback_data="admin_clear_db", style="danger")]
+def _build_admin_buttons_html(chat_id: int) -> str:
+    # Кнопки встроены в тело Rich-сообщения через <tg-button-row>
+    # (Bot API 10.3+), а не отдельной клавиатурой через reply_markup -
+    # см. core.telegram.org/bots/api#inputrichmessage, "Rich HTML style".
+    ui_manager = get_ui_manager()
+    return (
+        ui_manager.format_rich_button_row([
+            {"text": i18n.get(chat_id, "admin_btn_stats"), "callback_data": "admin_stats_global", "style": "primary"},
+            {"text": i18n.get(chat_id, "admin_btn_bc"), "callback_data": "admin_broadcast", "style": "primary"},
+        ])
+        + ui_manager.format_rich_button_row([
+            {"text": i18n.get(chat_id, "admin_btn_users"), "callback_data": "admin_user_list", "style": "primary"},
+            {"text": i18n.get(chat_id, "admin_btn_clear"), "callback_data": "admin_clear_db", "style": "danger"},
+        ])
+    )
+
+def _build_back_button_html(chat_id: int) -> str:
+    ui_manager = get_ui_manager()
+    return ui_manager.format_rich_button_row([
+        {"text": i18n.get(chat_id, "admin_btn_back"), "callback_data": "admin_back"},
     ])
 
-def _build_back_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_back"), callback_data="admin_back")]])
-
-def _build_broadcast_waiting_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel", style="danger")]])
+def _build_broadcast_waiting_button_html(chat_id: int) -> str:
+    ui_manager = get_ui_manager()
+    return ui_manager.format_rich_button_row([
+        {"text": i18n.get(chat_id, "admin_btn_cancel"), "callback_data": "broadcast_cancel", "style": "danger"},
+    ])
 
 def _build_admin_panel_text(chat_id: int) -> str:
     ui_manager = get_ui_manager()
@@ -71,7 +83,7 @@ def _build_admin_panel_text(chat_id: int) -> str:
         (i18n.get(chat_id, "admin_stat_size"), f"{total_size:.1f} MB"),
     ])
     footer = i18n.get(chat_id, "admin_panel_footer")
-    return f"<h3>🛠️ {i18n.get(chat_id, 'admin_panel_title')}</h3>{table}<footer>{footer}</footer>"
+    return f"<h3>🛠️ {i18n.get(chat_id, 'admin_panel_title')}</h3>{table}<footer>{footer}</footer>{_build_admin_buttons_html(chat_id)}"
 
 def _build_global_stats_rich(chat_id: int) -> str:
     # Пилот Rich Messages (Bot API 10.1+): реальная <table> вместо
@@ -123,6 +135,7 @@ def _build_global_stats_rich(chat_id: int) -> str:
         f"{table}"
         f"<h3>{i18n.get(chat_id, 'admin_top_users')}</h3>"
         f"{top_block}"
+        f"{_build_back_button_html(chat_id)}"
     )
 
 def _build_user_list_text(chat_id: int) -> str:
@@ -132,7 +145,7 @@ def _build_user_list_text(chat_id: int) -> str:
     title = i18n.get(chat_id, "admin_users_title")
 
     if not user_list:
-        return ui_manager.format_rich_panel(title, [i18n.get(chat_id, "admin_db_empty")], icon="👥")
+        return ui_manager.format_rich_panel(title, [i18n.get(chat_id, "admin_db_empty")], icon="👥") + _build_back_button_html(chat_id)
 
     header = ("ID", f"{i18n.get(chat_id, 'admin_ul_dl')} / {i18n.get(chat_id, 'admin_ul_vid')} / {i18n.get(chat_id, 'admin_ul_aud')} / {i18n.get(chat_id, 'admin_ul_other')} / {i18n.get(chat_id, 'admin_ul_size')}")
     rows = [
@@ -146,6 +159,7 @@ def _build_user_list_text(chat_id: int) -> str:
     html_content = f"<h3>👥 {title}</h3>{table}"
     if len(user_list) > 20:
         html_content += f"<p>{i18n.get(chat_id, 'admin_and_more', c=len(user_list) - 20)}</p>"
+    html_content += _build_back_button_html(chat_id)
     return html_content
 
 def _extract_broadcast_payload(message: Message) -> BroadcastPayload | None:
@@ -247,13 +261,13 @@ def register_admin_handlers(router: Router):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
         await state.clear()
-        await _reply_rich(message, _build_admin_panel_text(chat_id), reply_markup=_build_admin_keyboard(chat_id))
+        await _reply_rich(message, _build_admin_panel_text(chat_id))
 
     async def broadcast_command(message: Message, state: FSMContext):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
         await state.set_state(BroadcastStates.waiting_for_message)
-        await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣"), reply_markup=_build_broadcast_waiting_keyboard(chat_id))
+        await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣") + _build_broadcast_waiting_button_html(chat_id))
 
     async def process_broadcast_message(message: Message, state: FSMContext):
         if not message.from_user or not is_admin(message.from_user.id): return
@@ -270,11 +284,11 @@ def register_admin_handlers(router: Router):
         broadcast_cache[message.from_user.id] = {"payload": payload, "user_ids": user_ids, "total": len(user_ids)}
         await state.clear()
 
-        kbd = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes"), callback_data="broadcast_confirm", style="success"),
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel", style="danger")
-        ]])
-        await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_confirm"), [i18n.get(chat_id, "admin_bc_receivers", c=len(user_ids)), i18n.get(chat_id, "admin_bc_continue")], icon="📣"), reply_markup=kbd)
+        buttons_html = ui_manager.format_rich_button_row([
+            {"text": i18n.get(chat_id, "admin_btn_yes"), "callback_data": "broadcast_confirm", "style": "success"},
+            {"text": i18n.get(chat_id, "admin_btn_cancel"), "callback_data": "broadcast_cancel", "style": "danger"},
+        ])
+        await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_confirm"), [i18n.get(chat_id, "admin_bc_receivers", c=len(user_ids)), i18n.get(chat_id, "admin_bc_continue")], icon="📣") + buttons_html)
 
     async def stats_global_command(message: Message):
         if not message.from_user or not is_admin(message.from_user.id): return
@@ -288,37 +302,40 @@ def register_admin_handlers(router: Router):
         chat_id = call.message.chat.id
         await call.answer()
         rich = InputRichMessage(html=_build_global_stats_rich(chat_id))
-        await call.message.edit_text(rich_message=rich, reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(rich_message=rich)
 
     async def callback_admin_broadcast(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await state.set_state(BroadcastStates.waiting_for_message)
         await call.answer()
-        await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣")), reply_markup=_build_broadcast_waiting_keyboard(chat_id))
+        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣") + _build_broadcast_waiting_button_html(chat_id)
+        await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_admin_user_list(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await call.answer()
-        await call.message.edit_text(rich_message=InputRichMessage(html=_build_user_list_text(chat_id)), reply_markup=_build_back_keyboard(chat_id))
+        await call.message.edit_text(rich_message=InputRichMessage(html=_build_user_list_text(chat_id)))
 
     async def callback_admin_clear_db(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await call.answer()
-        kbd = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes_clear"), callback_data="admin_clear_confirm", style="danger"),
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="admin_back")
-        ]])
-        await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_clear_title"), [i18n.get(chat_id, "admin_clear_q1"), i18n.get(chat_id, "admin_clear_q2")], icon="⚠️")), reply_markup=kbd)
+        buttons_html = ui_manager.format_rich_button_row([
+            {"text": i18n.get(chat_id, "admin_btn_yes_clear"), "callback_data": "admin_clear_confirm", "style": "danger"},
+            {"text": i18n.get(chat_id, "admin_btn_cancel"), "callback_data": "admin_back"},
+        ])
+        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_clear_title"), [i18n.get(chat_id, "admin_clear_q1"), i18n.get(chat_id, "admin_clear_q2")], icon="⚠️") + buttons_html
+        await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_admin_clear_confirm(call: CallbackQuery):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         get_stats_manager().clear_all_stats()
         await call.answer(i18n.get(chat_id, "admin_clear_done"))
-        await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_clear_done"), [i18n.get(chat_id, "admin_clear_success")], icon="✅")), reply_markup=_build_back_keyboard(chat_id))
+        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_clear_done"), [i18n.get(chat_id, "admin_clear_success")], icon="✅") + _build_back_button_html(chat_id)
+        await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_broadcast_confirm(call: CallbackQuery, bot: Bot):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
@@ -359,7 +376,8 @@ def register_admin_handlers(router: Router):
                 except Exception: pass
 
         broadcast_cache.pop(call.from_user.id, None)
-        await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_finished"), [i18n.get(chat_id, "admin_bc_success_count", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="✅")), reply_markup=_build_back_keyboard(chat_id))
+        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_finished"), [i18n.get(chat_id, "admin_bc_success_count", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="✅") + _build_back_button_html(chat_id)
+        await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_broadcast_cancel(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
@@ -367,14 +385,15 @@ def register_admin_handlers(router: Router):
         await state.clear()
         broadcast_cache.pop(call.from_user.id, None)
         await call.answer(i18n.get(chat_id, "admin_bc_cancelled"))
-        await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕")), reply_markup=_build_back_keyboard(chat_id))
+        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕") + _build_back_button_html(chat_id)
+        await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_admin_back(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await state.clear()
         await call.answer()
-        await call.message.edit_text(rich_message=InputRichMessage(html=_build_admin_panel_text(chat_id)), reply_markup=_build_admin_keyboard(chat_id))
+        await call.message.edit_text(rich_message=InputRichMessage(html=_build_admin_panel_text(chat_id)))
 
     router.message.register(admin_command, Command("admin"))
     router.message.register(broadcast_command, Command("broadcast"))
