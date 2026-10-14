@@ -33,3 +33,9 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Собранные бинарники (scripts/build_telegram_bot_api_linux_amd64.sh) -
+# компилируемый артефакт, не исходники; случайно закоммиченная копия
+# утащила за собой чужой встроенный ключ в историю (см. GHSA secret-scanning #1)
+dist/
+.build/
