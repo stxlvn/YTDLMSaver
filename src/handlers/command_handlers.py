@@ -7,8 +7,6 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     InputRichMessage,
     Message,
     CallbackQuery,
@@ -51,12 +49,13 @@ def register_command_handlers(router: Router):
     async def lang_command(m: Message, state: FSMContext):
         await state.clear()
         chat_id = m.chat.id
-        buttons = []
-        for lang_code, strings in i18n.locales.items():
-            lang_name = strings.get("_lang_name", f"🌍 {lang_code.upper()}")
-            buttons.append([InlineKeyboardButton(text=lang_name, callback_data=f"setlang_{lang_code}")])
-        kbd = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await safe_reply_rich(m, f"<p>{i18n.get(chat_id, 'menu_lang')}</p>", reply_markup=kbd)
+        buttons_html = "".join(
+            ui_manager.format_rich_button_row([
+                {"text": strings.get("_lang_name", f"🌍 {lang_code.upper()}"), "callback_data": f"setlang_{lang_code}"}
+            ])
+            for lang_code, strings in i18n.locales.items()
+        )
+        await safe_reply_rich(m, f"<p>{i18n.get(chat_id, 'menu_lang')}</p>{buttons_html}")
 
     async def lang_callback(c: CallbackQuery):
         uid = c.from_user.id
@@ -99,8 +98,10 @@ def register_command_handlers(router: Router):
                 lines.append(f"⏳ <b>{title}</b>")
                 lines.append(i18n.get(chat_id, 'status_queue'))
             lines.append("")
-        kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads", style="danger")]])
-        await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)
+        buttons_html = ui_manager.format_rich_button_row([
+            {"text": i18n.get(chat_id, "btn_cancel_all"), "callback_data": "cancel_all_downloads", "style": "danger"},
+        ])
+        await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦") + buttons_html)
 
     async def cancel_download(m: Message, state: FSMContext):
         await state.clear()

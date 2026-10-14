@@ -283,16 +283,15 @@ def extract_video_info(
             "thread_id": message_thread_id,
         }
 
-        markup = build_download_markup(user_message_id, info, resolutions)
+        buttons_html = build_download_markup(user_message_id, info, resolutions)
         title = html.escape(info.get('title') or 'video')
         meta_parts = [part for part in (_format_duration(info.get('duration')), info.get('extractor_key')) if part]
         meta_line = html.escape(" · ".join(meta_parts)) if meta_parts else i18n.get(chat_id, "status_found_desc")
         _safe_edit_rich_message_text(
             bot,
-            ui_manager.format_rich_panel(title, [meta_line]),
+            ui_manager.format_rich_panel(title, [meta_line]) + buttons_html,
             chat_id,
             status_message_id,
-            reply_markup=markup,
         )
     except Exception as exc:
         error_text = str(exc)
