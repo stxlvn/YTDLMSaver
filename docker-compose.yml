@@ -1,6 +1,6 @@
 services:
   telegram-bot-api:
-    image: aiogram/telegram-bot-api:latest
+    image: aiogram/telegram-bot-api:10.3   # закреплено - :latest застрял на старом снапшоте (10.2), бот уже требовал 10.3 для кнопок в Rich Messages, и правки молча не работали
     container_name: telegram-bot-api
     restart: unless-stopped
     ports:
