@@ -781,7 +781,11 @@ def _download_and_send_video(task, bot, temp_dir):
                 from ..utils.message_templates import MessageTemplate
                 c_title = cached.get("title") or getattr(task, "info", {}).get("title") or ""
                 c_desc = cached.get("description") or getattr(task, "info", {}).get("description")
-                c_caption = MessageTemplate.format_caption(c_title, getattr(task, "url", ""), getattr(task, "action", "video"), chat_id=task.chat_id, description=c_desc)
+                if media_type == "audio":
+                    c_quality = "MP3 · 192 kbps"
+                else:
+                    c_quality = f"{c_height}p · аудио включено" if c_height else None
+                c_caption = MessageTemplate.format_caption(c_title, getattr(task, "url", ""), getattr(task, "action", "video"), chat_id=task.chat_id, description=c_desc, quality=c_quality)
                 part1, part2 = MessageTemplate.split_caption(c_caption, 1024)
                 if media_type == "video":
                     kwargs = {'supports_streaming': True, 'caption': part1, 'parse_mode': 'HTML', 'message_thread_id': task.message_thread_id}

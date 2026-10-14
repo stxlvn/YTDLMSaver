@@ -10,7 +10,7 @@ class MessageTemplate:
         return escape(str(value or ""))
 
     @staticmethod
-    def format_caption(title: str, url: str, action: str = "video", file_size: Optional[float] = None, chat_id: int = 0, description: Optional[str] = None) -> str:
+    def format_caption(title: str, url: str, action: str = "video", file_size: Optional[float] = None, chat_id: int = 0, description: Optional[str] = None, quality: Optional[str] = None) -> str:
         # Экранируем контент ДО того, как обернем его в теги
         safe_title = MessageTemplate._escape_text(title).strip()
         safe_desc = MessageTemplate._escape_text(description).strip()
@@ -22,7 +22,8 @@ class MessageTemplate:
         parts = []
         if safe_title: parts.append(f"🎬 <b>{safe_title}</b>")
         if safe_desc and safe_desc != safe_title: parts.append(f"<blockquote expandable>{safe_desc}</blockquote>")
-        
+        if quality: parts.append(f"📊 {MessageTemplate._escape_text(quality)}")
+
         return "\n\n".join(parts)
 
     @staticmethod

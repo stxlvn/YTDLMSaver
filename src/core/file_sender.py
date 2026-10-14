@@ -228,6 +228,11 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
     def send_operation():
         duration = video_metadata.get("duration") or task.info.get("duration")
         safe_duration = int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
+        if task.action == "audio":
+            quality = "MP3 · 192 kbps"
+        else:
+            height = video_metadata.get("height")
+            quality = f"{height}p · аудио включено" if height else None
         caption_full = MessageTemplate.format_caption(
             title=original_title,
             url=task.url,
@@ -235,6 +240,7 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
             file_size=file_size_mb,
             chat_id=task.chat_id,
             description=task.info.get("description"),
+            quality=quality,
         )
         caption, caption_part2 = MessageTemplate.split_caption(caption_full, 1024)
         if caption_part2:
