@@ -191,12 +191,15 @@ class DownloadManager:
                                 lines.append("")
                                 lines.append(i18n.get(task.chat_id, "status_send_after_process"))
 
+                            cancel_button = ui_manager.format_rich_button_row([
+                                {"text": i18n.get(task.chat_id, "btn_cancel"), "callback_data": f"task_cancel_{task_id}", "style": "danger"},
+                            ])
                             self.bot.edit_rich_message_text(
                                 ui_manager.format_rich_panel(
                                     title,
                                     lines,
                                     icon=stage_icon,
-                                ),
+                                ) + cancel_button,
                                 task.chat_id,
                                 task.message_id,
                             )

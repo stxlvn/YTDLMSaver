@@ -364,7 +364,21 @@ def register_download_handlers(router: Router, sync_bot):
             except Exception:
                 pass
 
+    async def handle_task_cancel(call: CallbackQuery):
+        chat_id = call.message.chat.id
+        task_id = call.data.split("task_cancel_", 1)[-1]
+        cancelled = _download_manager.cancel_task(task_id)
+        await call.answer(i18n.get(chat_id, "status_cancelled_count", count=1 if cancelled else 0))
+        try:
+            await call.message.delete()
+        except Exception:
+            try:
+                await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "status_cancelled"), icon="✕")))
+            except Exception:
+                pass
+
     router.message.register(process_url_message, StateFilter(None), lambda m: bool((m.text or m.caption) and not (m.text or m.caption or "").strip().startswith("/")))
     router.callback_query.register(handle_download, lambda c: bool(c.data and c.data.startswith("dl_")))
     router.callback_query.register(handle_cancel_all, lambda c: c.data == "cancel_all_downloads")
+    router.callback_query.register(handle_task_cancel, lambda c: bool(c.data and c.data.startswith("task_cancel_")))
     router.callback_query.register(handle_cancel, lambda c: bool(c.data and c.data.startswith("cancel_")))
