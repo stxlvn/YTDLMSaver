@@ -785,7 +785,8 @@ def _download_and_send_video(task, bot, temp_dir):
                 if media_type == "audio":
                     c_quality = "MP3 · 192 kbps"
                 else:
-                    c_quality = f"{c_height}p · аудио включено" if c_height else None
+                    c_short_side = min(c_width, c_height) if c_width and c_height else (c_height or c_width)
+                    c_quality = f"{c_short_side}p · аудио включено" if c_short_side else None
                 c_caption = MessageTemplate.format_caption(c_title, getattr(task, "url", ""), getattr(task, "action", "video"), chat_id=task.chat_id, quality=c_quality)
                 part1, part2 = MessageTemplate.split_caption(c_caption, 1024)
                 if media_type == "video":

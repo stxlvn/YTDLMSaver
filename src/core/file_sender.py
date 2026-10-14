@@ -231,8 +231,13 @@ def send_file_with_retry(task, file_path, title, bot, thumbnail_path: str = None
         if task.action == "audio":
             quality = "MP3 · 192 kbps"
         else:
-            height = video_metadata.get("height")
-            quality = f"{height}p · аудио включено" if height else None
+            # Для вертикального видео (Shorts/Reels, высота > ширины) "p"
+            # по конвенции считают по короткой стороне (1080x1920 = "1080p",
+            # а не "1920p") - как и для горизонтального, где короткая сторона
+            # это height.
+            w, h = video_metadata.get("width"), video_metadata.get("height")
+            short_side = min(w, h) if w and h else (h or w)
+            quality = f"{short_side}p · аудио включено" if short_side else None
         caption_full = MessageTemplate.format_caption(
             title=original_title,
             url=task.url,
