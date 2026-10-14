@@ -73,19 +73,19 @@ def get_markup_builder(chat_id):
             pref = [4320, 2160, 1440, 1080, 720, 480, 360]
             av = [h for h in pref if h in filtered_res]
             ex = [h for h in sorted(filtered_res.keys(), reverse=True) if h not in av]
-            btns = [InlineKeyboardButton(text=i18n.get(chat_id, "btn_res", height=h), callback_data=f"dl_res_{h}_{message_id}") for h in (av + ex)[:6]]
+            btns = [InlineKeyboardButton(text=i18n.get(chat_id, "btn_res", height=h), callback_data=f"dl_res_{h}_{message_id}", style="primary") for h in (av + ex)[:6]]
             rows.extend([btns[i:i+2] for i in range(0, len(btns), 2)])
         else:
             fb = []
-            if "best" in available_actions: fb.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_max"), callback_data=f"dl_best_{message_id}")])
+            if "best" in available_actions: fb.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_max"), callback_data=f"dl_best_{message_id}", style="primary")])
             ml = []
-            if "medium" in available_actions: ml.append(InlineKeyboardButton(text=i18n.get(chat_id, "btn_720"), callback_data=f"dl_medium_{message_id}"))
-            if "low" in available_actions: ml.append(InlineKeyboardButton(text=i18n.get(chat_id, "btn_480"), callback_data=f"dl_low_{message_id}"))
+            if "medium" in available_actions: ml.append(InlineKeyboardButton(text=i18n.get(chat_id, "btn_720"), callback_data=f"dl_medium_{message_id}", style="primary"))
+            if "low" in available_actions: ml.append(InlineKeyboardButton(text=i18n.get(chat_id, "btn_480"), callback_data=f"dl_low_{message_id}", style="primary"))
             if ml: fb.append(ml)
             rows.extend(fb)
 
         if "audio" in available_actions: rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_audio"), callback_data=f"dl_audio_{message_id}", style="primary")])
-        if info.get("duration", 999) <= 30 and "gif" in available_actions: rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_gif"), callback_data=f"dl_gif_{message_id}")])
+        if info.get("duration", 999) <= 30 and "gif" in available_actions: rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_gif"), callback_data=f"dl_gif_{message_id}", style="primary")])
         if info.get("subtitles") or info.get("automatic_captions"): rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_subs"), callback_data=f"dl_subtitles_{message_id}", style="primary")])
         if info.get("thumbnail"): rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_thumb"), callback_data=f"dl_thumbnail_{message_id}", style="success")])
         rows.append([InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel"), callback_data=f"cancel_{message_id}", style="danger")])

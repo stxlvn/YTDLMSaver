@@ -39,17 +39,17 @@ class BroadcastPayload:
 
 def _build_admin_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_stats"), callback_data="admin_stats_global"),
-         InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_bc"), callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_users"), callback_data="admin_user_list"),
-         InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_clear"), callback_data="admin_clear_db")]
+        [InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_stats"), callback_data="admin_stats_global", style="primary"),
+         InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_bc"), callback_data="admin_broadcast", style="primary")],
+        [InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_users"), callback_data="admin_user_list", style="primary"),
+         InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_clear"), callback_data="admin_clear_db", style="danger")]
     ])
 
 def _build_back_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_back"), callback_data="admin_back")]])
 
 def _build_broadcast_waiting_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel", style="danger")]])
 
 def _build_admin_panel_text(chat_id: int) -> str:
     ui_manager = get_ui_manager()
@@ -271,8 +271,8 @@ def register_admin_handlers(router: Router):
         await state.clear()
 
         kbd = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes"), callback_data="broadcast_confirm"),
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel")
+            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes"), callback_data="broadcast_confirm", style="success"),
+            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="broadcast_cancel", style="danger")
         ]])
         await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_confirm"), [i18n.get(chat_id, "admin_bc_receivers", c=len(user_ids)), i18n.get(chat_id, "admin_bc_continue")], icon="📣"), reply_markup=kbd)
 
@@ -308,7 +308,7 @@ def register_admin_handlers(router: Router):
         chat_id = call.message.chat.id
         await call.answer()
         kbd = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes_clear"), callback_data="admin_clear_confirm"),
+            InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_yes_clear"), callback_data="admin_clear_confirm", style="danger"),
             InlineKeyboardButton(text=i18n.get(chat_id, "admin_btn_cancel"), callback_data="admin_back")
         ]])
         await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_clear_title"), [i18n.get(chat_id, "admin_clear_q1"), i18n.get(chat_id, "admin_clear_q2")], icon="⚠️")), reply_markup=kbd)

@@ -99,7 +99,7 @@ def register_command_handlers(router: Router):
                 lines.append(f"⏳ <b>{title}</b>")
                 lines.append(i18n.get(chat_id, 'status_queue'))
             lines.append("")
-        kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads")]])
+        kbd = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=i18n.get(chat_id, "btn_cancel_all"), callback_data="cancel_all_downloads", style="danger")]])
         await safe_reply_rich(m, ui_manager.format_rich_panel(i18n.get(chat_id, "status_your_dl"), lines, icon="📦"), reply_markup=kbd)
 
     async def cancel_download(m: Message, state: FSMContext):
