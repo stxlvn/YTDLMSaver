@@ -85,7 +85,7 @@ def _build_admin_panel_text(chat_id: int) -> str:
     footer = i18n.get(chat_id, "admin_panel_footer")
     return f"<h3>🛠️ {i18n.get(chat_id, 'admin_panel_title')}</h3>{table}<footer>{footer}</footer>{_build_admin_buttons_html(chat_id)}"
 
-def _build_global_stats_rich(chat_id: int) -> str:
+def _build_global_stats_rich(chat_id: int, *, show_back: bool = True) -> str:
     # Пилот Rich Messages (Bot API 10.1+): реальная <table> вместо
     # "• label: value" строк - см. core.telegram.org/bots/api#inputrichmessage.
     ui_manager = get_ui_manager()
@@ -135,7 +135,7 @@ def _build_global_stats_rich(chat_id: int) -> str:
         f"{table}"
         f"<h3>{i18n.get(chat_id, 'admin_top_users')}</h3>"
         f"{top_block}"
-        f"{_build_back_button_html(chat_id)}"
+        f"{_build_back_button_html(chat_id) if show_back else ''}"
     )
 
 def _build_user_list_text(chat_id: int) -> str:
@@ -267,11 +267,13 @@ def register_admin_handlers(router: Router):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
         await state.set_state(BroadcastStates.waiting_for_message)
+        await state.update_data(from_panel=False)
         await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣") + _build_broadcast_waiting_button_html(chat_id))
 
     async def process_broadcast_message(message: Message, state: FSMContext):
         if not message.from_user or not is_admin(message.from_user.id): return
         chat_id = message.chat.id
+        from_panel = (await state.get_data()).get("from_panel", False)
         payload = _extract_broadcast_payload(message)
         if payload is None:
             return await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_err_title"), [i18n.get(chat_id, "admin_bc_err_desc")], icon="⚠️"))
@@ -281,7 +283,7 @@ def register_admin_handlers(router: Router):
             await state.clear()
             return await _reply_rich(message, ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_no_users"), [i18n.get(chat_id, "admin_bc_no_users_desc")], icon="📣"))
 
-        broadcast_cache[message.from_user.id] = {"payload": payload, "user_ids": user_ids, "total": len(user_ids)}
+        broadcast_cache[message.from_user.id] = {"payload": payload, "user_ids": user_ids, "total": len(user_ids), "from_panel": from_panel}
         await state.clear()
 
         buttons_html = ui_manager.format_rich_button_row([
@@ -292,7 +294,8 @@ def register_admin_handlers(router: Router):
 
     async def stats_global_command(message: Message):
         if not message.from_user or not is_admin(message.from_user.id): return
-        rich = InputRichMessage(html=_build_global_stats_rich(message.chat.id))
+        # Прямая команда - открыта не из /admin, возвращаться в панель некуда.
+        rich = InputRichMessage(html=_build_global_stats_rich(message.chat.id, show_back=False))
         await message.bot.send_rich_message(
             message.chat.id, rich, reply_parameters=ReplyParameters(message_id=message.message_id)
         )
@@ -308,6 +311,7 @@ def register_admin_handlers(router: Router):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
         chat_id = call.message.chat.id
         await state.set_state(BroadcastStates.waiting_for_message)
+        await state.update_data(from_panel=True)
         await call.answer()
         html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_title"), [i18n.get(chat_id, "admin_bc_prompt")], icon="📣") + _build_broadcast_waiting_button_html(chat_id)
         await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
@@ -345,6 +349,7 @@ def register_admin_handlers(router: Router):
         await call.answer()
 
         payload, user_ids, total_users = data["payload"], data["user_ids"], data["total"]
+        from_panel = data.get("from_panel", False)
         await call.message.edit_text(rich_message=InputRichMessage(html=ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_started"), [i18n.get(chat_id, "admin_bc_sent", s=0, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=0)], icon="📣")))
 
         sent = failed = 0
@@ -376,7 +381,9 @@ def register_admin_handlers(router: Router):
                 except Exception: pass
 
         broadcast_cache.pop(call.from_user.id, None)
-        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_finished"), [i18n.get(chat_id, "admin_bc_success_count", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="✅") + _build_back_button_html(chat_id)
+        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_finished"), [i18n.get(chat_id, "admin_bc_success_count", s=sent, t=total_users), i18n.get(chat_id, "admin_bc_err_count", e=failed)], icon="✅")
+        if from_panel:
+            html_content += _build_back_button_html(chat_id)
         await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_broadcast_cancel(call: CallbackQuery, state: FSMContext):
@@ -385,8 +392,13 @@ def register_admin_handlers(router: Router):
         await state.clear()
         broadcast_cache.pop(call.from_user.id, None)
         await call.answer(i18n.get(chat_id, "admin_bc_cancelled"))
-        html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕") + _build_back_button_html(chat_id)
-        await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
+        # Отмена - тупиковое действие, не навигация: сообщение удаляется
+        # вместо показа экрана "отменено" с кнопкой "Назад" в никуда.
+        try:
+            await call.message.delete()
+        except Exception:
+            html_content = ui_manager.format_rich_panel(i18n.get(chat_id, "admin_bc_cancelled").replace(".", ""), icon="✕")
+            await call.message.edit_text(rich_message=InputRichMessage(html=html_content))
 
     async def callback_admin_back(call: CallbackQuery, state: FSMContext):
         if not call.from_user or not is_admin(call.from_user.id) or not call.message: return
