@@ -223,19 +223,14 @@ def common_ydl_opts() -> dict:
 
     - ``source_address``: force IPv4. VPS/shared hosts often advertise IPv6 with
       an unstable route, which yt-dlp surfaces as spurious HTTP 403s.
-    - YouTube client selection: the bgutil PO-token provider supplies the tokens
-      the ``tv`` / ``web_safari`` clients need, so no account cookies are
-      required. ``tv_embedded`` / ``web_embedded`` are kept in the list because
-      they still serve a few otherwise-restricted videos; true age-gated ones
-      need the yt_cookies.txt fallback. The forced ``mweb`` client used before
-      needed its own cookies + PO token (and the option key was misspelled
-      ``player-client``, so yt-dlp ignored it anyway).
+    - ``js_runtimes``: YouTube's signature/n-challenges need a JS runtime plus
+      the EJS solver (pip ``yt-dlp-ejs``). yt-dlp only enables deno by default,
+      which isn't installed here - without node, age-gated videos come back
+      with nothing but a storyboard even with valid yt_cookies.txt.
     """
     return {
         "source_address": "0.0.0.0",
-        "extractor_args": {
-            "youtube": ["player_client=default,tv,tv_embedded,web_embedded,web_safari"]
-        },
+        "js_runtimes": {"node": {}},
     }
 
 
