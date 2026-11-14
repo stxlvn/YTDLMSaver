@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -188,7 +189,12 @@ def _cookiefile_opts(path_str: str) -> dict:
     path = Path(path_str)
     try:
         if path.is_file() and path.stat().st_size > 0:
-            return {"cookiefile": str(path)}
+            # yt-dlp saves its jar back into cookiefile on close; a server-side
+            # session kill would then erase the login cookies from the master.
+            scratch = path.with_name(path.name + ".ytdlp")
+            shutil.copyfile(path, scratch)
+            os.chmod(scratch, 0o600)
+            return {"cookiefile": str(scratch)}
     except OSError:
         pass
     return {}

@@ -69,12 +69,11 @@ class Site:
         if self.name == "instagram":
             page.goto("https://www.instagram.com/", wait_until="networkidle", timeout=30000)
             return "/accounts/login" not in page.url
-        # youtube
+        # youtube: the page renders in the profile's locale ("Войти", not
+        # "Sign in"), so check the actual login cookie instead of button text.
         page.goto("https://www.youtube.com/", wait_until="networkidle", timeout=30000)
-        try:
-            return not page.get_by_text("Sign in", exact=False).first.is_visible(timeout=3000)
-        except Exception:  # noqa: BLE001
-            return False
+        names = {c["name"] for c in page.context.cookies() if "youtube.com" in c["domain"]}
+        return "LOGIN_INFO" in names and ("SID" in names or "__Secure-1PSID" in names)
 
 
 def _active_sites() -> list[Site]:

@@ -39,3 +39,4 @@ venv/
 # утащила за собой чужой встроенный ключ в историю (см. GHSA secret-scanning #1)
 dist/
 .build/
+*.txt.ytdlp
