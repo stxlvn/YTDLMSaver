@@ -1,4 +1,4 @@
-aiogram==3.31.0
+aiogram==3.34.0
 yt-dlp==2026.11.23
 yt-dlp-ejs==0.8.0
 requests==2.34.2
